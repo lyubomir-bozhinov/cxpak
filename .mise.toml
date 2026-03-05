@@ -1,0 +1,5 @@
+[tools]
+rust = "latest"
+
+[tools.cargo-binstall]
+version = "latest"
