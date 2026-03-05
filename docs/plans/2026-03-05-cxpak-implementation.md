@@ -2997,6 +2997,1492 @@ git push origin main
 
 ---
 
+---
+
+## TDD Enforcement Patch
+
+**MANDATORY**: Every task must follow strict Red-Green-Refactor. No implementation code is written before a failing test exists for it. Coverage is measured and gated at every commit.
+
+### Global: Coverage Tooling (apply during Task 1)
+
+Add `cargo-tarpaulin` to the dev workflow. Every `cargo test` step in every task below must be followed by a coverage check:
+
+```bash
+cargo tarpaulin --out Html --output-dir coverage/ --skip-clean -- --test-threads=1
+# Open coverage/tarpaulin-report.html to verify 100% on changed code
+```
+
+Add to `Cargo.toml` dev-dependencies:
+
+```toml
+[dev-dependencies]
+# ... existing ...
+tempfile = "3"
+```
+
+Add to `.gitignore`:
+
+```
+coverage/
+```
+
+The CI workflow (Task 14) must gate on coverage:
+
+```yaml
+- name: Coverage
+  run: |
+    cargo install cargo-tarpaulin
+    cargo tarpaulin --fail-under 95 --skip-clean -- --test-threads=1
+```
+
+---
+
+### Task 1 Patch: Add coverage tooling setup
+
+After Step 7 ("Verify it compiles"), add:
+
+**Step 7b: Install and verify coverage tooling**
+
+Run: `cargo install cargo-tarpaulin`
+Run: `cargo tarpaulin --skip-clean`
+Expected: 0 tests, 100% trivially (no code to cover yet)
+
+---
+
+### Task 2 Patch: Add missing error-path CLI tests
+
+After the existing tests in Step 1, add these failing tests:
+
+```rust
+#[test]
+fn test_overview_zero_tokens_rejected() {
+    Command::cargo_bin("cxpak")
+        .unwrap()
+        .args(["overview", "--tokens", "0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("must be greater than 0"));
+}
+
+#[test]
+fn test_overview_invalid_tokens_rejected() {
+    Command::cargo_bin("cxpak")
+        .unwrap()
+        .args(["overview", "--tokens", "abc"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid token count"));
+}
+
+#[test]
+fn test_overview_negative_tokens_rejected() {
+    Command::cargo_bin("cxpak")
+        .unwrap()
+        .args(["overview", "--tokens", "-5"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_no_subcommand_shows_help() {
+    Command::cargo_bin("cxpak")
+        .unwrap()
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Usage"));
+}
+
+#[test]
+fn test_overview_verbose_flag() {
+    Command::cargo_bin("cxpak")
+        .unwrap()
+        .args(["overview", "--tokens", "50k", "--verbose"])
+        .assert(); // just verify it doesn't panic
+}
+
+#[test]
+fn test_overview_all_formats_accepted() {
+    for format in &["markdown", "xml", "json"] {
+        Command::cargo_bin("cxpak")
+            .unwrap()
+            .args(["overview", "--tokens", "50k", "--format", format])
+            .assert(); // verify format flag is accepted
+    }
+}
+
+#[test]
+fn test_overview_invalid_format_rejected() {
+    Command::cargo_bin("cxpak")
+        .unwrap()
+        .args(["overview", "--tokens", "50k", "--format", "yaml"])
+        .assert()
+        .failure();
+}
+```
+
+Add to `parse_token_count` unit tests:
+
+```rust
+#[test]
+fn test_parse_token_count_whitespace() {
+    assert_eq!(parse_token_count("  50k  ").unwrap(), 50000);
+}
+
+#[test]
+fn test_parse_token_count_zero() {
+    assert_eq!(parse_token_count("0").unwrap(), 0);
+}
+
+#[test]
+fn test_parse_token_count_very_large() {
+    assert_eq!(parse_token_count("1000k").unwrap(), 1_000_000);
+    assert_eq!(parse_token_count("2m").unwrap(), 2_000_000);
+}
+```
+
+After Step 5 add:
+
+**Step 5b: Run coverage and verify 100% on cli module**
+
+Run: `cargo tarpaulin --skip-clean -- --test-threads=1 2>&1 | grep "src/cli"`
+Expected: 100% coverage on `src/cli/mod.rs`
+
+---
+
+### Task 3 Patch: Add .cxpakignore, error path, and edge case tests
+
+Add to the test fixture `tests/fixtures/simple_repo/`:
+
+```
+├── .cxpakignore     (contains: "tests/\n*.toml")
+├── node_modules/
+│   └── dep/
+│       └── index.js (contains: "module.exports = {};")
+├── empty_dir/       (empty directory)
+```
+
+Add these tests to `scanner_test.rs`:
+
+```rust
+#[test]
+fn test_scanner_respects_cxpakignore() {
+    // Create a temp repo with a .cxpakignore that excludes tests/
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path();
+
+    // Init git repo
+    std::process::Command::new("git").args(["init"]).current_dir(path).output().unwrap();
+
+    // Create files
+    std::fs::create_dir_all(path.join("src")).unwrap();
+    std::fs::create_dir_all(path.join("tests")).unwrap();
+    std::fs::write(path.join("src/main.rs"), "fn main() {}").unwrap();
+    std::fs::write(path.join("tests/test.rs"), "#[test] fn t() {}").unwrap();
+    std::fs::write(path.join(".cxpakignore"), "tests/").unwrap();
+
+    let scanner = cxpak::scanner::Scanner::new(path).unwrap();
+    let files = scanner.scan().unwrap();
+    let paths: Vec<String> = files.iter().map(|f| f.relative_path.clone()).collect();
+
+    assert!(paths.iter().any(|p| p.contains("src/main.rs")));
+    assert!(!paths.iter().any(|p| p.contains("tests/")));
+}
+
+#[test]
+fn test_scanner_builtin_ignores_node_modules() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path();
+
+    std::process::Command::new("git").args(["init"]).current_dir(path).output().unwrap();
+
+    std::fs::create_dir_all(path.join("node_modules/dep")).unwrap();
+    std::fs::write(path.join("node_modules/dep/index.js"), "module.exports = {};").unwrap();
+    std::fs::create_dir_all(path.join("src")).unwrap();
+    std::fs::write(path.join("src/app.js"), "console.log('hi');").unwrap();
+
+    let scanner = cxpak::scanner::Scanner::new(path).unwrap();
+    let files = scanner.scan().unwrap();
+    let paths: Vec<String> = files.iter().map(|f| f.relative_path.clone()).collect();
+
+    assert!(!paths.iter().any(|p| p.contains("node_modules")));
+    assert!(paths.iter().any(|p| p.contains("src/app.js")));
+}
+
+#[test]
+fn test_scanner_not_a_git_repo() {
+    let dir = tempfile::TempDir::new().unwrap();
+    // No .git directory
+    let result = cxpak::scanner::Scanner::new(dir.path());
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("not a git repository"));
+}
+
+#[test]
+fn test_scanner_invalid_path() {
+    let result = cxpak::scanner::Scanner::new(std::path::Path::new("/nonexistent/path/xyz"));
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_scanner_empty_repo() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path();
+    std::process::Command::new("git").args(["init"]).current_dir(path).output().unwrap();
+
+    let scanner = cxpak::scanner::Scanner::new(path).unwrap();
+    let files = scanner.scan().unwrap();
+    assert!(files.is_empty());
+}
+
+#[test]
+fn test_scanner_file_size_populated() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path();
+    std::process::Command::new("git").args(["init"]).current_dir(path).output().unwrap();
+    std::fs::write(path.join("hello.rs"), "fn main() {}").unwrap();
+
+    let scanner = cxpak::scanner::Scanner::new(path).unwrap();
+    let files = scanner.scan().unwrap();
+    assert!(!files.is_empty());
+    assert!(files[0].size_bytes > 0);
+}
+```
+
+Add unit tests for `detect_language` covering every supported extension:
+
+```rust
+#[cfg(test)]
+mod detect_tests {
+    use super::detect_language;
+
+    #[test]
+    fn test_all_supported_extensions() {
+        assert_eq!(detect_language("foo.rs"), Some("rust".into()));
+        assert_eq!(detect_language("foo.ts"), Some("typescript".into()));
+        assert_eq!(detect_language("foo.tsx"), Some("typescript".into()));
+        assert_eq!(detect_language("foo.js"), Some("javascript".into()));
+        assert_eq!(detect_language("foo.jsx"), Some("javascript".into()));
+        assert_eq!(detect_language("foo.mjs"), Some("javascript".into()));
+        assert_eq!(detect_language("foo.cjs"), Some("javascript".into()));
+        assert_eq!(detect_language("foo.java"), Some("java".into()));
+        assert_eq!(detect_language("foo.py"), Some("python".into()));
+        assert_eq!(detect_language("foo.go"), Some("go".into()));
+        assert_eq!(detect_language("foo.c"), Some("c".into()));
+        assert_eq!(detect_language("foo.h"), Some("c".into()));
+        assert_eq!(detect_language("foo.cpp"), Some("cpp".into()));
+        assert_eq!(detect_language("foo.hpp"), Some("cpp".into()));
+        assert_eq!(detect_language("foo.cc"), Some("cpp".into()));
+        assert_eq!(detect_language("foo.hh"), Some("cpp".into()));
+        assert_eq!(detect_language("foo.cxx"), Some("cpp".into()));
+    }
+
+    #[test]
+    fn test_unsupported_extensions() {
+        assert_eq!(detect_language("foo.md"), None);
+        assert_eq!(detect_language("foo.txt"), None);
+        assert_eq!(detect_language("foo.yaml"), None);
+        assert_eq!(detect_language("foo.json"), None);
+        assert_eq!(detect_language("Makefile"), None);
+    }
+
+    #[test]
+    fn test_no_extension() {
+        assert_eq!(detect_language("Dockerfile"), None);
+    }
+
+    #[test]
+    fn test_nested_path() {
+        assert_eq!(detect_language("src/deep/nested/file.rs"), Some("rust".into()));
+    }
+}
+```
+
+Add `ScanError` Display coverage tests:
+
+```rust
+#[test]
+fn test_scan_error_display() {
+    let err = ScanError::NotAGitRepo(PathBuf::from("/tmp/foo"));
+    assert!(err.to_string().contains("not a git repository"));
+
+    let err = ScanError::InvalidPath {
+        path: PathBuf::from("/bad"),
+        source: std::io::Error::new(std::io::ErrorKind::NotFound, "nope"),
+    };
+    assert!(err.to_string().contains("invalid path"));
+}
+```
+
+After Step 7 add:
+
+**Step 7b: Run coverage and verify 100% on scanner module**
+
+Run: `cargo tarpaulin --skip-clean -- --test-threads=1 2>&1 | grep "src/scanner"`
+Expected: 100% coverage on `src/scanner/mod.rs` and `src/scanner/defaults.rs`
+
+---
+
+### Task 4 Patch: Add edge case tests for token counter
+
+Add these tests:
+
+```rust
+#[test]
+fn test_count_unicode() {
+    let counter = TokenCounter::new();
+    let count = counter.count("こんにちは世界");
+    assert!(count > 0);
+}
+
+#[test]
+fn test_count_very_long_input() {
+    let counter = TokenCounter::new();
+    let long_text = "word ".repeat(10000);
+    let count = counter.count(&long_text);
+    assert!(count > 1000);
+}
+
+#[test]
+fn test_count_special_characters() {
+    let counter = TokenCounter::new();
+    let count = counter.count("!@#$%^&*()_+-=[]{}|;':\",./<>?");
+    assert!(count > 0);
+}
+
+#[test]
+fn test_count_or_zero_nonempty() {
+    let counter = TokenCounter::new();
+    let count = counter.count_or_zero("hello");
+    assert!(count > 0);
+    assert_eq!(count, counter.count("hello"));
+}
+
+#[test]
+fn test_count_newlines_only() {
+    let counter = TokenCounter::new();
+    let count = counter.count("\n\n\n");
+    assert!(count > 0);
+}
+```
+
+**Enforce TDD order**: Write tests first in a separate file, run to see them fail, then add the implementation.
+
+After Step 4 add:
+
+**Step 4b: Run coverage and verify 100% on budget/counter module**
+
+Run: `cargo tarpaulin --skip-clean -- --test-threads=1 2>&1 | grep "src/budget"`
+Expected: 100% coverage on `src/budget/counter.rs`
+
+---
+
+### Task 5 Patch: Add edge case and error path tests for parser
+
+Add to the Rust language tests:
+
+```rust
+#[test]
+fn test_extract_empty_source() {
+    let result = parse_rust("");
+    assert!(result.symbols.is_empty());
+    assert!(result.imports.is_empty());
+    assert!(result.exports.is_empty());
+}
+
+#[test]
+fn test_extract_comment_only() {
+    let result = parse_rust("// just a comment\n/* block comment */");
+    assert!(result.symbols.is_empty());
+}
+
+#[test]
+fn test_extract_multiple_functions() {
+    let source = "pub fn a() {}\npub fn b() {}\nfn c() {}";
+    let result = parse_rust(source);
+    assert_eq!(result.symbols.len(), 3);
+    assert_eq!(result.exports.len(), 2); // only pub ones
+}
+
+#[test]
+fn test_extract_const() {
+    let source = "pub const MAX: usize = 100;";
+    let result = parse_rust(source);
+    // Constants may or may not be extracted depending on implementation.
+    // This test documents the behavior.
+}
+
+#[test]
+fn test_extract_type_alias() {
+    let source = "pub type Result<T> = std::result::Result<T, Error>;";
+    let result = parse_rust(source);
+    // Documents behavior for type aliases
+}
+
+#[test]
+fn test_extract_nested_impl_in_mod() {
+    let source = r#"
+mod inner {
+    pub struct Bar;
+    impl Bar {
+        pub fn method(&self) {}
+    }
+}
+"#;
+    let result = parse_rust(source);
+    // Documents behavior for nested modules
+}
+
+#[test]
+fn test_extract_multiple_use_statements() {
+    let source = "use std::io;\nuse std::collections::HashMap;\nuse std::fmt::Display;";
+    let result = parse_rust(source);
+    assert_eq!(result.imports.len(), 3);
+}
+
+#[test]
+fn test_extract_grouped_use() {
+    let source = "use std::collections::{HashMap, BTreeMap};";
+    let result = parse_rust(source);
+    assert!(!result.imports.is_empty());
+}
+
+#[test]
+fn test_function_line_numbers() {
+    let source = "\n\npub fn hello() {\n}\n";
+    let result = parse_rust(source);
+    assert_eq!(result.symbols[0].start_line, 3);
+    assert_eq!(result.symbols[0].end_line, 4);
+}
+```
+
+Add registry tests:
+
+```rust
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+
+    #[test]
+    fn test_registry_has_rust() {
+        let registry = LanguageRegistry::new();
+        assert!(registry.get("rust").is_some());
+    }
+
+    #[test]
+    fn test_registry_unknown_language() {
+        let registry = LanguageRegistry::new();
+        assert!(registry.get("brainfuck").is_none());
+    }
+
+    #[test]
+    fn test_registry_supported_languages_nonempty() {
+        let registry = LanguageRegistry::new();
+        assert!(!registry.supported_languages().is_empty());
+    }
+}
+```
+
+After Step 5 add:
+
+**Step 5b: Run coverage and verify 100% on parser module**
+
+Run: `cargo tarpaulin --skip-clean -- --test-threads=1 2>&1 | grep "src/parser"`
+Expected: 100% coverage on all parser files
+
+---
+
+### Task 6 Patch: Mandatory test matrix per language
+
+**CRITICAL**: Task 6 is the biggest gap. Each language implementation MUST have these tests before the implementation is written:
+
+For **each** of the 7 languages (TypeScript, JavaScript, Java, Python, Go, C, C++), write the following test suite FIRST, run it to see it FAIL, then implement:
+
+```rust
+// Template — replace Lang with actual language struct, adjust source snippets
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_LANG(source: &str) -> ParseResult {
+        let lang = LANGLanguage;
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&lang.ts_language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        lang.extract(source, &tree)
+    }
+
+    #[test]
+    fn test_extract_empty_source() { /* ... */ }
+
+    #[test]
+    fn test_extract_public_function() { /* ... */ }
+
+    #[test]
+    fn test_extract_private_function() { /* ... */ }
+
+    #[test]
+    fn test_extract_class_or_struct() { /* ... */ }
+
+    #[test]
+    fn test_extract_interface_or_trait() { /* ... */ }
+
+    #[test]
+    fn test_extract_enum() { /* ... */ }
+
+    #[test]
+    fn test_extract_imports() { /* ... */ }
+
+    #[test]
+    fn test_extract_multiple_imports() { /* ... */ }
+
+    #[test]
+    fn test_extract_exports() { /* ... */ }
+
+    #[test]
+    fn test_extract_methods_in_class() { /* ... */ }
+
+    #[test]
+    fn test_visibility_detection() { /* ... */ }
+
+    #[test]
+    fn test_line_numbers_correct() { /* ... */ }
+
+    #[test]
+    fn test_signature_extraction() { /* ... */ }
+
+    #[test]
+    fn test_comment_only_file() { /* ... */ }
+}
+```
+
+**Per-language source snippets** (use idiomatic code for each):
+
+**TypeScript:**
+```typescript
+// Public function
+export function greet(name: string): string { return `hello ${name}`; }
+// Interface
+export interface User { name: string; age: number; }
+// Class
+export class UserService { constructor() {} getUser(): User { return { name: "", age: 0 }; } }
+// Enum
+export enum Status { Active, Inactive }
+// Import
+import { Something } from './module';
+```
+
+**JavaScript:**
+```javascript
+// Function
+export function add(a, b) { return a + b; }
+// Class
+export class Calculator { add(a, b) { return a + b; } }
+// Import
+import { foo } from './bar';
+const baz = require('./qux');
+```
+
+**Java:**
+```java
+// Class
+public class UserService {
+    private String name;
+    public UserService(String name) { this.name = name; }
+    public String getName() { return name; }
+    private void internal() {}
+}
+// Interface
+public interface Repository { void save(Object entity); }
+// Enum
+public enum Status { ACTIVE, INACTIVE }
+// Import
+import java.util.List;
+```
+
+**Python:**
+```python
+# Function
+def public_func(x: int) -> int:
+    return x + 1
+
+def _private_func():
+    pass
+
+# Class
+class MyClass:
+    def method(self):
+        pass
+
+    def _private_method(self):
+        pass
+
+# Imports
+import os
+from collections import defaultdict
+```
+
+**Go:**
+```go
+// Public function (capitalized)
+func PublicFunc() string { return "hello" }
+// Private function
+func privateFunc() {}
+// Struct
+type Config struct { Name string; port int }
+// Interface
+type Reader interface { Read(p []byte) (n int, err error) }
+// Import
+import "fmt"
+import ( "os"; "io" )
+```
+
+**C:**
+```c
+#include <stdio.h>
+#include "myheader.h"
+void public_func(int x) { printf("%d", x); }
+static void private_func() {}
+struct Config { int port; char* name; };
+enum Status { ACTIVE, INACTIVE };
+typedef struct { int x; int y; } Point;
+```
+
+**C++:**
+```cpp
+#include <string>
+#include "myheader.h"
+class MyClass {
+public:
+    void publicMethod() {}
+    int getValue() const { return value; }
+private:
+    int value;
+    void privateMethod() {}
+};
+namespace utils { void helper() {} }
+```
+
+**Step order for each language:**
+1. Write the full test suite with language-appropriate snippets
+2. Run: `cargo test parser::languages::LANG` — verify FAIL
+3. Implement the language support
+4. Run: `cargo test parser::languages::LANG` — verify PASS
+5. Run: `cargo tarpaulin --skip-clean -- --test-threads=1 2>&1 | grep "src/parser/languages/LANG"`
+6. Verify 100% coverage
+7. Commit: `git commit -m "feat: LANG language support with tests"`
+
+---
+
+### Task 7 Patch: Add index building and query tests
+
+Add these tests:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::language::*;
+
+    fn make_scanned_file(path: &str, lang: Option<&str>, content: &str) -> (ScannedFile, String) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file_path = dir.path().join(path);
+        std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+        std::fs::write(&file_path, content).unwrap();
+
+        (ScannedFile {
+            relative_path: path.to_string(),
+            absolute_path: file_path,
+            language: lang.map(|l| l.to_string()),
+            size_bytes: content.len() as u64,
+        }, content.to_string())
+    }
+
+    #[test]
+    fn test_build_index_empty() {
+        let counter = TokenCounter::new();
+        let index = CodebaseIndex::build(vec![], HashMap::new(), &counter);
+        assert_eq!(index.total_files, 0);
+        assert_eq!(index.total_bytes, 0);
+        assert_eq!(index.total_tokens, 0);
+    }
+
+    #[test]
+    fn test_build_index_language_stats() {
+        // Create temp files and build index, verify language_stats counts
+    }
+
+    #[test]
+    fn test_all_public_symbols_filters_private() {
+        // Build index with mixed visibility symbols, verify only public returned
+    }
+
+    #[test]
+    fn test_all_public_symbols_empty_when_no_parse_results() {
+        // Build index with no parse results, verify empty
+    }
+
+    #[test]
+    fn test_all_imports() {
+        // Build index with imports, verify they are collected
+    }
+
+    #[test]
+    fn test_all_imports_empty() {
+        // Build index with no imports, verify empty
+    }
+
+    #[test]
+    fn test_is_key_file_all_variants() {
+        // Test every key file pattern
+        assert!(CodebaseIndex::is_key_file("README.md"));
+        assert!(CodebaseIndex::is_key_file("readme.md"));
+        assert!(CodebaseIndex::is_key_file("README"));
+        assert!(CodebaseIndex::is_key_file("Cargo.toml"));
+        assert!(CodebaseIndex::is_key_file("package.json"));
+        assert!(CodebaseIndex::is_key_file("pom.xml"));
+        assert!(CodebaseIndex::is_key_file("build.gradle"));
+        assert!(CodebaseIndex::is_key_file("build.gradle.kts"));
+        assert!(CodebaseIndex::is_key_file("go.mod"));
+        assert!(CodebaseIndex::is_key_file("pyproject.toml"));
+        assert!(CodebaseIndex::is_key_file("setup.py"));
+        assert!(CodebaseIndex::is_key_file("setup.cfg"));
+        assert!(CodebaseIndex::is_key_file("makefile"));
+        assert!(CodebaseIndex::is_key_file("Makefile"));
+        assert!(CodebaseIndex::is_key_file("dockerfile"));
+        assert!(CodebaseIndex::is_key_file("Dockerfile"));
+        assert!(CodebaseIndex::is_key_file("docker-compose.yml"));
+        assert!(CodebaseIndex::is_key_file("docker-compose.yaml"));
+        assert!(CodebaseIndex::is_key_file(".env.example"));
+        assert!(CodebaseIndex::is_key_file("src/main.rs"));
+        assert!(CodebaseIndex::is_key_file("src/main.go"));
+        assert!(CodebaseIndex::is_key_file("src/main.py"));
+        assert!(CodebaseIndex::is_key_file("src/main.java"));
+        assert!(CodebaseIndex::is_key_file("app.py"));
+        assert!(CodebaseIndex::is_key_file("src/index.ts"));
+        assert!(CodebaseIndex::is_key_file("src/index.js"));
+    }
+
+    #[test]
+    fn test_is_key_file_negative() {
+        assert!(!CodebaseIndex::is_key_file("src/utils.rs"));
+        assert!(!CodebaseIndex::is_key_file("tests/test_foo.py"));
+        assert!(!CodebaseIndex::is_key_file("lib/helper.js"));
+        assert!(!CodebaseIndex::is_key_file("src/service.java"));
+    }
+}
+```
+
+Add `DependencyGraph` tests:
+
+```rust
+#[cfg(test)]
+mod graph_tests {
+    use super::*;
+
+    #[test]
+    fn test_graph_add_edge() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a.rs", "b.rs");
+        assert!(graph.dependencies("a.rs").unwrap().contains("b.rs"));
+    }
+
+    #[test]
+    fn test_graph_dependents() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a.rs", "b.rs");
+        graph.add_edge("c.rs", "b.rs");
+        let deps = graph.dependents("b.rs");
+        assert!(deps.contains(&"a.rs"));
+        assert!(deps.contains(&"c.rs"));
+    }
+
+    #[test]
+    fn test_graph_no_dependencies() {
+        let graph = DependencyGraph::new();
+        assert!(graph.dependencies("nonexistent.rs").is_none());
+    }
+
+    #[test]
+    fn test_graph_no_dependents() {
+        let graph = DependencyGraph::new();
+        assert!(graph.dependents("nonexistent.rs").is_empty());
+    }
+
+    #[test]
+    fn test_graph_multiple_deps() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a.rs", "b.rs");
+        graph.add_edge("a.rs", "c.rs");
+        let deps = graph.dependencies("a.rs").unwrap();
+        assert_eq!(deps.len(), 2);
+    }
+
+    #[test]
+    fn test_graph_duplicate_edge() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a.rs", "b.rs");
+        graph.add_edge("a.rs", "b.rs"); // duplicate
+        assert_eq!(graph.dependencies("a.rs").unwrap().len(), 1);
+    }
+}
+```
+
+After Step 4 add:
+
+**Step 4b: Run coverage and verify 100% on index module**
+
+Run: `cargo tarpaulin --skip-clean -- --test-threads=1 2>&1 | grep "src/index"`
+Expected: 100% on all index files
+
+---
+
+### Task 8 Patch: Add budget edge case and surplus redistribution tests
+
+Add these tests to `src/budget/mod.rs`:
+
+```rust
+#[test]
+fn test_allocate_metadata_larger_than_budget() {
+    // Budget smaller than the fixed metadata allocation
+    let alloc = BudgetAllocation::allocate(200);
+    // metadata should be capped, other sections should be 0
+    assert!(alloc.total() <= 200);
+}
+
+#[test]
+fn test_allocate_exact_500() {
+    let alloc = BudgetAllocation::allocate(500);
+    assert_eq!(alloc.metadata, 500);
+    assert_eq!(alloc.directory_tree, 0);
+    assert_eq!(alloc.git_context, 0);
+}
+
+#[test]
+fn test_allocate_proportions_correct() {
+    let alloc = BudgetAllocation::allocate(100_500); // 500 metadata + 100k distributable
+    assert_eq!(alloc.directory_tree, 5000);   // 5%
+    assert_eq!(alloc.module_map, 20000);      // 20%
+    assert_eq!(alloc.dependency_graph, 15000); // 15%
+    assert_eq!(alloc.key_files, 20000);        // 20%
+    assert_eq!(alloc.signatures, 30000);       // 30%
+    assert_eq!(alloc.git_context, 10000);      // 10%
+}
+
+#[test]
+fn test_allocate_1m_budget() {
+    let alloc = BudgetAllocation::allocate(1_000_000);
+    assert!(alloc.total() <= 1_000_000);
+    assert!(alloc.signatures > 200_000);
+}
+```
+
+Add these tests to `src/budget/degrader.rs`:
+
+```rust
+#[test]
+fn test_omission_marker_exact_1k_boundary() {
+    let marker = omission_marker("test", 1000, 2000);
+    assert!(marker.contains("~1.0k"));
+    assert!(marker.contains("2k+"));
+}
+
+#[test]
+fn test_omission_marker_sub_1k_boundary() {
+    let marker = omission_marker("test", 999, 999);
+    assert!(marker.contains("~999"));
+    assert!(marker.contains("999+"));
+}
+
+#[test]
+fn test_truncate_zero_budget() {
+    let counter = crate::budget::counter::TokenCounter::new();
+    let content = "hello world";
+    let (result, _used, omitted) = truncate_to_budget(content, 0, &counter, "test");
+    assert!(omitted > 0);
+    assert!(result.contains("<!-- test omitted"));
+}
+
+#[test]
+fn test_truncate_budget_exactly_fits() {
+    let counter = crate::budget::counter::TokenCounter::new();
+    let content = "hi";
+    let total = counter.count(content);
+    let (result, used, omitted) = truncate_to_budget(content, total, &counter, "test");
+    assert_eq!(omitted, 0);
+    assert_eq!(used, total);
+    assert_eq!(result, content);
+}
+
+#[test]
+fn test_truncate_multiline_partial() {
+    let counter = crate::budget::counter::TokenCounter::new();
+    let content = (0..50)
+        .map(|i| format!("line {} with some text", i))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let total_tokens = counter.count(&content);
+    let budget = total_tokens / 2;
+    let (result, _used, omitted) = truncate_to_budget(&content, budget, &counter, "partial");
+
+    assert!(omitted > 0);
+    assert!(result.contains("<!-- partial omitted"));
+    assert!(result.lines().count() < content.lines().count());
+}
+
+#[test]
+fn test_truncate_empty_content() {
+    let counter = crate::budget::counter::TokenCounter::new();
+    let (result, used, omitted) = truncate_to_budget("", 100, &counter, "empty");
+    assert_eq!(result, "");
+    assert_eq!(used, 0);
+    assert_eq!(omitted, 0);
+}
+
+#[test]
+fn test_truncate_single_line_exceeds() {
+    let counter = crate::budget::counter::TokenCounter::new();
+    // One very long line that exceeds budget
+    let content = "word ".repeat(1000);
+    let (result, _used, omitted) = truncate_to_budget(&content, 10, &counter, "long line");
+    assert!(omitted > 0);
+}
+```
+
+After Step 3 add:
+
+**Step 3b: Run coverage and verify 100% on budget module**
+
+Run: `cargo tarpaulin --skip-clean -- --test-threads=1 2>&1 | grep "src/budget"`
+Expected: 100% on `src/budget/mod.rs`, `src/budget/counter.rs`, `src/budget/degrader.rs`
+
+---
+
+### Task 9 Patch: Add git edge case tests
+
+Add these tests:
+
+```rust
+#[test]
+fn test_extract_git_context_empty_repo() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path();
+    Command::new("git").args(["init"]).current_dir(path).output().unwrap();
+    Command::new("git").args(["config", "user.email", "t@t.com"]).current_dir(path).output().unwrap();
+    Command::new("git").args(["config", "user.name", "T"]).current_dir(path).output().unwrap();
+
+    // Repo with no commits — revwalk should handle gracefully
+    let result = extract_git_context(path, 20);
+    // May error (no HEAD) or return empty — either is acceptable, but must not panic
+    match result {
+        Ok(ctx) => assert!(ctx.recent_commits.is_empty()),
+        Err(_) => {} // acceptable
+    }
+}
+
+#[test]
+fn test_extract_git_context_single_commit() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path();
+    Command::new("git").args(["init"]).current_dir(path).output().unwrap();
+    Command::new("git").args(["config", "user.email", "t@t.com"]).current_dir(path).output().unwrap();
+    Command::new("git").args(["config", "user.name", "T"]).current_dir(path).output().unwrap();
+    std::fs::write(path.join("f.txt"), "x").unwrap();
+    Command::new("git").args(["add", "."]).current_dir(path).output().unwrap();
+    Command::new("git").args(["commit", "-m", "first"]).current_dir(path).output().unwrap();
+
+    let ctx = extract_git_context(path, 20).unwrap();
+    assert_eq!(ctx.recent_commits.len(), 1);
+    assert_eq!(ctx.recent_commits[0].message, "first");
+    assert_eq!(ctx.contributors.len(), 1);
+}
+
+#[test]
+fn test_extract_git_context_max_commits_limit() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path();
+    Command::new("git").args(["init"]).current_dir(path).output().unwrap();
+    Command::new("git").args(["config", "user.email", "t@t.com"]).current_dir(path).output().unwrap();
+    Command::new("git").args(["config", "user.name", "T"]).current_dir(path).output().unwrap();
+
+    // Create 10 commits
+    for i in 0..10 {
+        std::fs::write(path.join("f.txt"), format!("v{i}")).unwrap();
+        Command::new("git").args(["add", "."]).current_dir(path).output().unwrap();
+        Command::new("git").args(["commit", "-m", &format!("commit {i}")]).current_dir(path).output().unwrap();
+    }
+
+    // Request only 3
+    let ctx = extract_git_context(path, 3).unwrap();
+    assert_eq!(ctx.recent_commits.len(), 3);
+}
+
+#[test]
+fn test_extract_git_context_multiple_contributors() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path();
+    Command::new("git").args(["init"]).current_dir(path).output().unwrap();
+
+    // Commit as user A
+    Command::new("git").args(["config", "user.email", "a@a.com"]).current_dir(path).output().unwrap();
+    Command::new("git").args(["config", "user.name", "Alice"]).current_dir(path).output().unwrap();
+    std::fs::write(path.join("a.txt"), "a").unwrap();
+    Command::new("git").args(["add", "."]).current_dir(path).output().unwrap();
+    Command::new("git").args(["commit", "-m", "alice commit"]).current_dir(path).output().unwrap();
+
+    // Commit as user B
+    Command::new("git").args(["config", "user.name", "Bob"]).current_dir(path).output().unwrap();
+    Command::new("git").args(["config", "user.email", "b@b.com"]).current_dir(path).output().unwrap();
+    std::fs::write(path.join("b.txt"), "b").unwrap();
+    Command::new("git").args(["add", "."]).current_dir(path).output().unwrap();
+    Command::new("git").args(["commit", "-m", "bob commit"]).current_dir(path).output().unwrap();
+
+    let ctx = extract_git_context(path, 20).unwrap();
+    assert_eq!(ctx.contributors.len(), 2);
+}
+
+#[test]
+fn test_extract_git_context_most_changed_files_sorted() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path();
+    Command::new("git").args(["init"]).current_dir(path).output().unwrap();
+    Command::new("git").args(["config", "user.email", "t@t.com"]).current_dir(path).output().unwrap();
+    Command::new("git").args(["config", "user.name", "T"]).current_dir(path).output().unwrap();
+
+    // Change hot.txt 5 times, cold.txt once
+    std::fs::write(path.join("cold.txt"), "x").unwrap();
+    std::fs::write(path.join("hot.txt"), "x").unwrap();
+    Command::new("git").args(["add", "."]).current_dir(path).output().unwrap();
+    Command::new("git").args(["commit", "-m", "init"]).current_dir(path).output().unwrap();
+
+    for i in 0..4 {
+        std::fs::write(path.join("hot.txt"), format!("v{i}")).unwrap();
+        Command::new("git").args(["add", "."]).current_dir(path).output().unwrap();
+        Command::new("git").args(["commit", "-m", &format!("update hot {i}")]).current_dir(path).output().unwrap();
+    }
+
+    let ctx = extract_git_context(path, 20).unwrap();
+    assert_eq!(ctx.most_changed_files[0].path, "hot.txt");
+    assert!(ctx.most_changed_files[0].commit_count > ctx.most_changed_files.last().unwrap().commit_count);
+}
+
+#[test]
+fn test_extract_git_context_not_a_repo() {
+    let dir = TempDir::new().unwrap();
+    let result = extract_git_context(dir.path(), 20);
+    assert!(result.is_err());
+}
+```
+
+After Step 3 add:
+
+**Step 3b: Run coverage and verify 100% on git module**
+
+Run: `cargo tarpaulin --skip-clean -- --test-threads=1 2>&1 | grep "src/git"`
+Expected: 100% on `src/git/mod.rs`
+
+---
+
+### Task 10 Patch: Add renderer tests for all formats
+
+Add XML renderer tests:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::output::OutputSections;
+
+    #[test]
+    fn test_xml_render_includes_sections() {
+        let sections = OutputSections {
+            metadata: "Rust project".into(),
+            directory_tree: "src/\n  main.rs".into(),
+            module_map: String::new(),
+            dependency_graph: String::new(),
+            key_files: String::new(),
+            signatures: String::new(),
+            git_context: String::new(),
+        };
+        let output = render(&sections);
+        assert!(output.starts_with("<cxpak>"));
+        assert!(output.ends_with("</cxpak>\n"));
+        assert!(output.contains("<metadata>"));
+        assert!(output.contains("</metadata>"));
+        assert!(output.contains("<directory-tree>"));
+        assert!(!output.contains("<module-map>")); // empty section omitted
+    }
+
+    #[test]
+    fn test_xml_escapes_special_chars() {
+        let sections = OutputSections {
+            metadata: "a < b && c > d \"quoted\"".into(),
+            directory_tree: String::new(),
+            module_map: String::new(),
+            dependency_graph: String::new(),
+            key_files: String::new(),
+            signatures: String::new(),
+            git_context: String::new(),
+        };
+        let output = render(&sections);
+        assert!(output.contains("&lt;"));
+        assert!(output.contains("&amp;"));
+        assert!(output.contains("&gt;"));
+        assert!(output.contains("&quot;"));
+    }
+
+    #[test]
+    fn test_xml_all_empty() {
+        let sections = OutputSections {
+            metadata: String::new(),
+            directory_tree: String::new(),
+            module_map: String::new(),
+            dependency_graph: String::new(),
+            key_files: String::new(),
+            signatures: String::new(),
+            git_context: String::new(),
+        };
+        let output = render(&sections);
+        assert_eq!(output, "<cxpak>\n</cxpak>\n");
+    }
+}
+```
+
+Add JSON renderer tests:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::output::OutputSections;
+
+    #[test]
+    fn test_json_render_valid_json() {
+        let sections = OutputSections {
+            metadata: "test".into(),
+            directory_tree: String::new(),
+            module_map: String::new(),
+            dependency_graph: String::new(),
+            key_files: String::new(),
+            signatures: String::new(),
+            git_context: String::new(),
+        };
+        let output = render(&sections);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(parsed["metadata"], "test");
+    }
+
+    #[test]
+    fn test_json_skips_empty_sections() {
+        let sections = OutputSections {
+            metadata: "test".into(),
+            directory_tree: String::new(),
+            module_map: String::new(),
+            dependency_graph: String::new(),
+            key_files: String::new(),
+            signatures: String::new(),
+            git_context: String::new(),
+        };
+        let output = render(&sections);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert!(parsed.get("directory_tree").is_none());
+    }
+
+    #[test]
+    fn test_json_all_sections_present() {
+        let sections = OutputSections {
+            metadata: "a".into(),
+            directory_tree: "b".into(),
+            module_map: "c".into(),
+            dependency_graph: "d".into(),
+            key_files: "e".into(),
+            signatures: "f".into(),
+            git_context: "g".into(),
+        };
+        let output = render(&sections);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(parsed["metadata"], "a");
+        assert_eq!(parsed["directory_tree"], "b");
+        assert_eq!(parsed["git_context"], "g");
+    }
+}
+```
+
+Add `output::render` dispatch test:
+
+```rust
+#[cfg(test)]
+mod dispatch_tests {
+    use super::*;
+    use crate::cli::OutputFormat;
+
+    fn test_sections() -> OutputSections {
+        OutputSections {
+            metadata: "test".into(),
+            directory_tree: String::new(),
+            module_map: String::new(),
+            dependency_graph: String::new(),
+            key_files: String::new(),
+            signatures: String::new(),
+            git_context: String::new(),
+        }
+    }
+
+    #[test]
+    fn test_render_markdown() {
+        let out = render(&test_sections(), &OutputFormat::Markdown);
+        assert!(out.contains("## Project Metadata"));
+    }
+
+    #[test]
+    fn test_render_xml() {
+        let out = render(&test_sections(), &OutputFormat::Xml);
+        assert!(out.contains("<cxpak>"));
+    }
+
+    #[test]
+    fn test_render_json() {
+        let out = render(&test_sections(), &OutputFormat::Json);
+        assert!(out.contains("\"metadata\""));
+    }
+}
+```
+
+After Step 6 add:
+
+**Step 6b: Run coverage and verify 100% on output module**
+
+Run: `cargo tarpaulin --skip-clean -- --test-threads=1 2>&1 | grep "src/output"`
+Expected: 100% on all output files
+
+---
+
+### Task 11 Patch: Add unit tests for overview orchestration
+
+The overview command has render helper functions (`render_metadata`, `render_directory_tree`, etc.) that are currently only tested through integration tests. Add unit tests:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::budget::counter::TokenCounter;
+
+    // Test render_metadata
+    #[test]
+    fn test_render_metadata_empty_index() {
+        let index = CodebaseIndex {
+            files: vec![],
+            language_stats: HashMap::new(),
+            total_files: 0,
+            total_bytes: 0,
+            total_tokens: 0,
+        };
+        let result = render_metadata(&index);
+        assert!(result.contains("Files:** 0"));
+    }
+
+    #[test]
+    fn test_render_metadata_with_languages() {
+        let mut stats = HashMap::new();
+        stats.insert("rust".into(), crate::index::LanguageStats {
+            file_count: 5,
+            total_bytes: 1000,
+            total_tokens: 500,
+        });
+        let index = CodebaseIndex {
+            files: vec![],
+            language_stats: stats,
+            total_files: 5,
+            total_bytes: 1000,
+            total_tokens: 500,
+        };
+        let result = render_metadata(&index);
+        assert!(result.contains("rust"));
+        assert!(result.contains("5 files"));
+    }
+
+    // Test render_directory_tree
+    #[test]
+    fn test_render_directory_tree_within_budget() {
+        let counter = TokenCounter::new();
+        // Build a small index with a few files
+        let index = CodebaseIndex {
+            files: vec![
+                IndexedFile {
+                    relative_path: "src/main.rs".into(),
+                    language: Some("rust".into()),
+                    size_bytes: 100,
+                    token_count: 50,
+                    parse_result: None,
+                    content: String::new(),
+                },
+            ],
+            language_stats: HashMap::new(),
+            total_files: 1,
+            total_bytes: 100,
+            total_tokens: 50,
+        };
+        let result = render_directory_tree(&index, 1000, &counter);
+        assert!(result.contains("src/main.rs"));
+    }
+
+    // Test render_git_context with non-repo
+    #[test]
+    fn test_render_git_context_not_a_repo() {
+        let counter = TokenCounter::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let result = render_git_context(dir.path(), 1000, &counter);
+        assert!(result.is_empty()); // graceful fallback
+    }
+}
+```
+
+After Step 6 add:
+
+**Step 6b: Run coverage and verify 100% on commands module**
+
+Run: `cargo tarpaulin --skip-clean -- --test-threads=1 2>&1 | grep "src/commands"`
+Expected: 100% on `src/commands/overview.rs`, 100% on `src/commands/trace.rs`
+
+---
+
+### Task 12 Patch: Expand integration tests
+
+Add these integration tests:
+
+```rust
+#[test]
+fn test_overview_verbose_shows_progress() {
+    let dir = create_test_repo(); // helper that creates a temp git repo
+    Command::cargo_bin("cxpak")
+        .unwrap()
+        .args(["overview", "--tokens", "50k", "--verbose"])
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("cxpak: scanning"));
+}
+
+#[test]
+fn test_overview_tiny_budget_warns() {
+    let dir = create_large_test_repo(); // helper with many files
+    Command::cargo_bin("cxpak")
+        .unwrap()
+        .args(["overview", "--tokens", "100"])
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("heavily truncated"));
+}
+
+#[test]
+fn test_overview_output_is_valid_json() {
+    let dir = create_test_repo();
+    let output = Command::cargo_bin("cxpak")
+        .unwrap()
+        .args(["overview", "--tokens", "50k", "--format", "json"])
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let _: serde_json::Value = serde_json::from_str(&stdout).expect("invalid JSON output");
+}
+
+#[test]
+fn test_overview_output_is_valid_xml() {
+    let dir = create_test_repo();
+    let output = Command::cargo_bin("cxpak")
+        .unwrap()
+        .args(["overview", "--tokens", "50k", "--format", "xml"])
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.starts_with("<cxpak>"));
+    assert!(stdout.trim().ends_with("</cxpak>"));
+}
+
+#[test]
+fn test_overview_out_flag_creates_file() {
+    let dir = create_test_repo();
+    let out_dir = tempfile::TempDir::new().unwrap();
+    let out_file = out_dir.path().join("result.md");
+
+    Command::cargo_bin("cxpak")
+        .unwrap()
+        .args(["overview", "--tokens", "50k", "--out", out_file.to_str().unwrap()])
+        .arg(dir.path())
+        .assert()
+        .success();
+
+    assert!(out_file.exists());
+    let content = std::fs::read_to_string(&out_file).unwrap();
+    assert!(!content.is_empty());
+    assert!(content.contains("## Project Metadata"));
+}
+
+#[test]
+fn test_overview_out_flag_stdout_is_empty() {
+    let dir = create_test_repo();
+    let out_dir = tempfile::TempDir::new().unwrap();
+    let out_file = out_dir.path().join("result.md");
+
+    let output = Command::cargo_bin("cxpak")
+        .unwrap()
+        .args(["overview", "--tokens", "50k", "--out", out_file.to_str().unwrap()])
+        .arg(dir.path())
+        .output()
+        .unwrap();
+
+    // stdout should be empty when --out is used
+    assert!(output.stdout.is_empty());
+}
+```
+
+---
+
+### Task 14 Patch: Coverage gate in CI
+
+Update the CI workflow to include a hard coverage gate:
+
+```yaml
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install tarpaulin
+        run: cargo install cargo-tarpaulin
+      - name: Run coverage
+        run: cargo tarpaulin --fail-under 95 --skip-clean -- --test-threads=1
+```
+
+**Why 95 and not 100**: Some lines are genuinely unreachable in tests (e.g., `process::exit`, `unwrap` on infallible paths). Target 100% on business logic, accept 95% as the CI gate to avoid flaky failures on platform-specific code paths.
+
+---
+
+## TDD Workflow Enforcement — Mandatory Per-Task Sequence
+
+Every task MUST follow this exact sequence. No exceptions.
+
+```
+1. Write failing test(s) for the feature/function
+2. Run: cargo test — verify FAIL with expected error
+3. Write minimal implementation to make test pass
+4. Run: cargo test — verify PASS
+5. Run: cargo tarpaulin --skip-clean -- --test-threads=1
+6. Verify 100% coverage on changed files
+7. Refactor if needed (tests must still pass)
+8. Commit ONLY when tests pass AND coverage is 100%
+```
+
+If at step 6 any line is uncovered:
+- Write a test that hits that line
+- Go back to step 4
+
+---
+
 ## Task Summary
 
 | Task | Description | Depends On |
