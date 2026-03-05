@@ -1,0 +1,12 @@
+# Additional patterns to exclude from cxpak analysis
+# Uses the same syntax as .gitignore
+
+# Generated code
+generated/
+*.generated.ts
+
+# Vendored dependencies
+vendor/
+
+# Large test fixtures
+tests/fixtures/large/

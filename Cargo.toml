@@ -1,0 +1,43 @@
+[package]
+name = "cxpak"
+version = "0.1.0"
+edition = "2021"
+description = "Spends CPU cycles so you don't spend tokens. The LLM gets a briefing packet instead of a flashlight in a dark room."
+license = "MIT"
+repository = "https://github.com/lyubomir-bozhinov/cxpak"
+keywords = ["llm", "context", "tree-sitter", "cli", "ai"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+tree-sitter = "0.24"
+tree-sitter-rust = { version = "0.24", optional = true }
+tree-sitter-typescript = { version = "0.23", optional = true }
+tree-sitter-javascript = { version = "0.23", optional = true }
+tree-sitter-java = { version = "0.23", optional = true }
+tree-sitter-python = { version = "0.23", optional = true }
+tree-sitter-go = { version = "0.23", optional = true }
+tree-sitter-c = { version = "0.24", optional = true }
+tree-sitter-cpp = { version = "0.23", optional = true }
+tiktoken-rs = "0.6"
+git2 = "0.19"
+ignore = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+quick-xml = { version = "0.36", features = ["serialize"] }
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+
+[features]
+default = ["lang-rust", "lang-typescript", "lang-javascript", "lang-java", "lang-python", "lang-go", "lang-c", "lang-cpp"]
+lang-rust = ["dep:tree-sitter-rust"]
+lang-typescript = ["dep:tree-sitter-typescript"]
+lang-javascript = ["dep:tree-sitter-javascript"]
+lang-java = ["dep:tree-sitter-java"]
+lang-python = ["dep:tree-sitter-python"]
+lang-go = ["dep:tree-sitter-go"]
+lang-c = ["dep:tree-sitter-c"]
+lang-cpp = ["dep:tree-sitter-cpp"]
