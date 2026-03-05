@@ -20,6 +20,27 @@ impl LanguageRegistry {
     fn register_defaults(&mut self) {
         #[cfg(feature = "lang-rust")]
         self.register(Box::new(languages::rust::RustLanguage));
+
+        #[cfg(feature = "lang-typescript")]
+        self.register(Box::new(languages::typescript::TypeScriptLanguage));
+
+        #[cfg(feature = "lang-javascript")]
+        self.register(Box::new(languages::javascript::JavaScriptLanguage));
+
+        #[cfg(feature = "lang-python")]
+        self.register(Box::new(languages::python::PythonLanguage));
+
+        #[cfg(feature = "lang-java")]
+        self.register(Box::new(languages::java::JavaLanguage));
+
+        #[cfg(feature = "lang-go")]
+        self.register(Box::new(languages::go::GoLanguage));
+
+        #[cfg(feature = "lang-c")]
+        self.register(Box::new(languages::c::CLanguage));
+
+        #[cfg(feature = "lang-cpp")]
+        self.register(Box::new(languages::cpp::CppLanguage));
     }
 
     pub fn register(&mut self, lang: Box<dyn LanguageSupport>) {
