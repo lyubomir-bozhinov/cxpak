@@ -24,5 +24,8 @@ fn emit_section(out: &mut String, tag: &str, content: &str) {
 }
 
 fn escape_xml(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }

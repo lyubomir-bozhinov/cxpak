@@ -37,7 +37,11 @@ impl fmt::Display for ScanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ScanError::NotARepository(p) => {
-                write!(f, "not a git repository (no .git directory found in {})", p.display())
+                write!(
+                    f,
+                    "not a git repository (no .git directory found in {})",
+                    p.display()
+                )
             }
             ScanError::Walk(msg) => write!(f, "directory walk error: {msg}"),
             ScanError::Override(msg) => write!(f, "override builder error: {msg}"),
@@ -62,7 +66,9 @@ impl Scanner {
         if !git_dir.exists() {
             return Err(ScanError::NotARepository(root.to_path_buf()));
         }
-        Ok(Self { root: root.to_path_buf() })
+        Ok(Self {
+            root: root.to_path_buf(),
+        })
     }
 
     /// Walk the repository and return all matching files, sorted by relative path.
@@ -85,10 +91,10 @@ impl Scanner {
         // Build the walker.
         let mut builder = WalkBuilder::new(&self.root);
         builder
-            .git_ignore(true)       // respect .gitignore
-            .git_global(false)      // skip global gitignore for determinism
-            .git_exclude(false)     // skip .git/info/exclude for determinism
-            .hidden(true)           // visit hidden files (we handle .git via overrides)
+            .git_ignore(true) // respect .gitignore
+            .git_global(false) // skip global gitignore for determinism
+            .git_exclude(false) // skip .git/info/exclude for determinism
+            .hidden(true) // visit hidden files (we handle .git via overrides)
             .overrides(overrides);
 
         // Load .cxpakignore if present.
@@ -116,10 +122,7 @@ impl Scanner {
                 .to_string_lossy()
                 .replace('\\', "/");
 
-            let size_bytes = entry
-                .metadata()
-                .map(|m| m.len())
-                .unwrap_or(0);
+            let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
 
             let language = detect_language(&absolute_path);
 

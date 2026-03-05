@@ -1,4 +1,6 @@
-use crate::parser::language::{Export, Import, LanguageSupport, ParseResult, Symbol, SymbolKind, Visibility};
+use crate::parser::language::{
+    Export, Import, LanguageSupport, ParseResult, Symbol, SymbolKind, Visibility,
+};
 use tree_sitter::Language as TsLanguage;
 
 pub struct JavaScriptLanguage;
@@ -58,7 +60,10 @@ impl JavaScriptLanguage {
     fn extract_import(node: &tree_sitter::Node, source: &[u8]) -> Option<Import> {
         let text = Self::node_text(node, source);
         let source_path = if let Some(from_idx) = text.rfind(" from ") {
-            text[from_idx + 6..].trim().trim_matches(|c| c == '\'' || c == '"' || c == ';').to_string()
+            text[from_idx + 6..]
+                .trim()
+                .trim_matches(|c| c == '\'' || c == '"' || c == ';')
+                .to_string()
         } else {
             String::new()
         };
@@ -77,14 +82,25 @@ impl JavaScriptLanguage {
             vec!["*".to_string()]
         } else {
             let after_import = text.trim_start_matches("import").trim();
-            let name = after_import.split_whitespace().next().unwrap_or("").to_string();
-            if name.is_empty() || name == "from" { vec![] } else { vec![name] }
+            let name = after_import
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_string();
+            if name.is_empty() || name == "from" {
+                vec![]
+            } else {
+                vec![name]
+            }
         };
 
         if source_path.is_empty() && names.is_empty() {
             None
         } else {
-            Some(Import { source: source_path, names })
+            Some(Import {
+                source: source_path,
+                names,
+            })
         }
     }
 }
@@ -126,38 +142,72 @@ impl LanguageSupport for JavaScriptLanguage {
                 "function_declaration" => {
                     let name = Self::extract_name(&node, source_bytes);
                     let is_pub = Self::is_exported(&node);
-                    let visibility = if is_pub { Visibility::Public } else { Visibility::Private };
+                    let visibility = if is_pub {
+                        Visibility::Public
+                    } else {
+                        Visibility::Private
+                    };
                     let signature = Self::extract_fn_signature(&node, source_bytes);
                     let body = Self::extract_fn_body(&node, source_bytes);
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
                     if is_pub {
-                        exports.push(Export { name: name.clone(), kind: SymbolKind::Function });
+                        exports.push(Export {
+                            name: name.clone(),
+                            kind: SymbolKind::Function,
+                        });
                     }
-                    symbols.push(Symbol { name, kind: SymbolKind::Function, visibility, signature, body, start_line, end_line });
+                    symbols.push(Symbol {
+                        name,
+                        kind: SymbolKind::Function,
+                        visibility,
+                        signature,
+                        body,
+                        start_line,
+                        end_line,
+                    });
                 }
 
                 "class_declaration" => {
                     let name = Self::extract_name(&node, source_bytes);
                     let is_pub = Self::is_exported(&node);
-                    let visibility = if is_pub { Visibility::Public } else { Visibility::Private };
+                    let visibility = if is_pub {
+                        Visibility::Public
+                    } else {
+                        Visibility::Private
+                    };
                     let signature = Self::first_line(&node, source_bytes);
                     let body = Self::node_text(&node, source_bytes).to_string();
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
                     if is_pub {
-                        exports.push(Export { name: name.clone(), kind: SymbolKind::Class });
+                        exports.push(Export {
+                            name: name.clone(),
+                            kind: SymbolKind::Class,
+                        });
                     }
-                    symbols.push(Symbol { name, kind: SymbolKind::Class, visibility, signature, body, start_line, end_line });
+                    symbols.push(Symbol {
+                        name,
+                        kind: SymbolKind::Class,
+                        visibility,
+                        signature,
+                        body,
+                        start_line,
+                        end_line,
+                    });
                 }
 
                 _ => {}
             }
         }
 
-        ParseResult { symbols, imports, exports }
+        ParseResult {
+            symbols,
+            imports,
+            exports,
+        }
     }
 }
 
@@ -185,12 +235,20 @@ mod tests {
         let lang = JavaScriptLanguage;
         let result = lang.extract(source, &tree);
 
-        let funcs: Vec<_> = result.symbols.iter().filter(|s| s.kind == SymbolKind::Function).collect();
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
         assert!(!funcs.is_empty(), "expected at least one function");
         assert_eq!(funcs[0].name, "greet");
         assert_eq!(funcs[0].visibility, Visibility::Public);
 
-        let exported: Vec<_> = result.exports.iter().filter(|e| e.name == "greet").collect();
+        let exported: Vec<_> = result
+            .exports
+            .iter()
+            .filter(|e| e.name == "greet")
+            .collect();
         assert!(!exported.is_empty(), "greet should be exported");
     }
 
@@ -241,7 +299,11 @@ mod tests {
         let lang = JavaScriptLanguage;
         let result = lang.extract(source, &tree);
 
-        let classes: Vec<_> = result.symbols.iter().filter(|s| s.kind == SymbolKind::Class).collect();
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
         assert!(!classes.is_empty(), "expected class symbol");
         assert_eq!(classes[0].name, "Dog");
         assert_eq!(classes[0].visibility, Visibility::Public);

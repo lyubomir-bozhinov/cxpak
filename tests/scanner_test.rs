@@ -17,8 +17,7 @@ fn fixture_root() -> std::path::PathBuf {
 /// Using `std::fs::create_dir_all` is safe to call even when the directory already
 /// exists.
 fn ensure_git_dir(root: &Path) {
-    std::fs::create_dir_all(root.join(".git"))
-        .expect("failed to create fixture .git directory");
+    std::fs::create_dir_all(root.join(".git")).expect("failed to create fixture .git directory");
 }
 
 // ---------------------------------------------------------------------------
@@ -202,8 +201,7 @@ fn language_detection_none_for_markdown() {
         .expect("README.md should be in scan results");
 
     assert_eq!(
-        readme.language,
-        None,
+        readme.language, None,
         "README.md should have language == None"
     );
 }

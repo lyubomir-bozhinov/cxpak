@@ -74,7 +74,10 @@ mod tests {
     #[test]
     fn test_truncate_exceeds() {
         let counter = crate::budget::counter::TokenCounter::new();
-        let content = (0..100).map(|i| format!("this is line number {} with some padding text", i)).collect::<Vec<_>>().join("\n");
+        let content = (0..100)
+            .map(|i| format!("this is line number {} with some padding text", i))
+            .collect::<Vec<_>>()
+            .join("\n");
         let (result, _used, omitted) = truncate_to_budget(&content, 10, &counter, "test section");
         assert!(omitted > 0);
         assert!(result.contains("<!-- test section omitted"));

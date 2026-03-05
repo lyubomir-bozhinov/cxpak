@@ -6,14 +6,20 @@ pub struct DependencyGraph {
 }
 
 impl DependencyGraph {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn add_edge(&mut self, from: &str, to: &str) {
-        self.edges.entry(from.to_string()).or_default().insert(to.to_string());
+        self.edges
+            .entry(from.to_string())
+            .or_default()
+            .insert(to.to_string());
     }
 
     pub fn dependents(&self, path: &str) -> Vec<&str> {
-        self.edges.iter()
+        self.edges
+            .iter()
             .filter(|(_, deps)| deps.contains(path))
             .map(|(k, _)| k.as_str())
             .collect()

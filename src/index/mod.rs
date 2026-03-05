@@ -1,9 +1,9 @@
-pub mod symbols;
 pub mod graph;
+pub mod symbols;
 
-use crate::parser::language::{ParseResult, Symbol, Import, Export, Visibility};
-use crate::scanner::ScannedFile;
 use crate::budget::counter::TokenCounter;
+use crate::parser::language::{Import, ParseResult, Symbol, Visibility};
+use crate::scanner::ScannedFile;
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -51,7 +51,9 @@ impl CodebaseIndex {
 
             if let Some(lang) = &file.language {
                 let stats = language_stats.entry(lang.clone()).or_insert(LanguageStats {
-                    file_count: 0, total_bytes: 0, total_tokens: 0,
+                    file_count: 0,
+                    total_bytes: 0,
+                    total_tokens: 0,
                 });
                 stats.file_count += 1;
                 stats.total_bytes += file.size_bytes;
@@ -79,21 +81,30 @@ impl CodebaseIndex {
     }
 
     pub fn all_public_symbols(&self) -> Vec<(&str, &Symbol)> {
-        self.files.iter()
-            .filter_map(|f| f.parse_result.as_ref().map(|pr| {
-                pr.symbols.iter()
-                    .filter(|s| s.visibility == Visibility::Public)
-                    .map(move |s| (f.relative_path.as_str(), s))
-            }))
+        self.files
+            .iter()
+            .filter_map(|f| {
+                f.parse_result.as_ref().map(|pr| {
+                    pr.symbols
+                        .iter()
+                        .filter(|s| s.visibility == Visibility::Public)
+                        .map(move |s| (f.relative_path.as_str(), s))
+                })
+            })
             .flatten()
             .collect()
     }
 
     pub fn all_imports(&self) -> Vec<(&str, &Import)> {
-        self.files.iter()
-            .filter_map(|f| f.parse_result.as_ref().map(|pr| {
-                pr.imports.iter().map(move |i| (f.relative_path.as_str(), i))
-            }))
+        self.files
+            .iter()
+            .filter_map(|f| {
+                f.parse_result.as_ref().map(|pr| {
+                    pr.imports
+                        .iter()
+                        .map(move |i| (f.relative_path.as_str(), i))
+                })
+            })
             .flatten()
             .collect()
     }
@@ -101,14 +112,30 @@ impl CodebaseIndex {
     pub fn is_key_file(path: &str) -> bool {
         let lower = path.to_lowercase();
         let filename = lower.rsplit('/').next().unwrap_or(&lower);
-        matches!(filename,
-            "readme.md" | "readme" | "cargo.toml" | "package.json" | "pom.xml"
-            | "build.gradle" | "build.gradle.kts" | "go.mod" | "pyproject.toml"
-            | "setup.py" | "setup.cfg" | "makefile" | "dockerfile"
-            | "docker-compose.yml" | "docker-compose.yaml" | ".env.example"
-        ) || lower.ends_with("main.rs") || lower.ends_with("main.go")
-            || lower.ends_with("main.py") || lower.ends_with("main.java")
-            || lower.ends_with("app.py") || lower.ends_with("index.ts")
+        matches!(
+            filename,
+            "readme.md"
+                | "readme"
+                | "cargo.toml"
+                | "package.json"
+                | "pom.xml"
+                | "build.gradle"
+                | "build.gradle.kts"
+                | "go.mod"
+                | "pyproject.toml"
+                | "setup.py"
+                | "setup.cfg"
+                | "makefile"
+                | "dockerfile"
+                | "docker-compose.yml"
+                | "docker-compose.yaml"
+                | ".env.example"
+        ) || lower.ends_with("main.rs")
+            || lower.ends_with("main.go")
+            || lower.ends_with("main.py")
+            || lower.ends_with("main.java")
+            || lower.ends_with("app.py")
+            || lower.ends_with("index.ts")
             || lower.ends_with("index.js")
     }
 }

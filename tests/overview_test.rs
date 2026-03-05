@@ -28,12 +28,15 @@ fn make_temp_repo() -> TempDir {
 
     // Stage and commit
     let mut index = repo.index().unwrap();
-    index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None).unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
     index.write().unwrap();
     let tree_id = index.write_tree().unwrap();
     let tree = repo.find_tree(tree_id).unwrap();
     let sig = git2::Signature::now("Test", "test@test.com").unwrap();
-    repo.commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[]).unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
+        .unwrap();
 
     dir
 }
@@ -85,8 +88,10 @@ fn test_overview_out_flag() {
         .unwrap()
         .args([
             "overview",
-            "--tokens", "50k",
-            "--out", out_file.to_str().unwrap(),
+            "--tokens",
+            "50k",
+            "--out",
+            out_file.to_str().unwrap(),
         ])
         .arg(repo.path())
         .assert()

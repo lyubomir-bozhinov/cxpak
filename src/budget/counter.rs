@@ -4,6 +4,12 @@ pub struct TokenCounter {
     bpe: tiktoken_rs::CoreBPE,
 }
 
+impl Default for TokenCounter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TokenCounter {
     pub fn new() -> Self {
         Self {

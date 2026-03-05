@@ -1,4 +1,6 @@
-use crate::parser::language::{Export, Import, LanguageSupport, ParseResult, Symbol, SymbolKind, Visibility};
+use crate::parser::language::{
+    Export, Import, LanguageSupport, ParseResult, Symbol, SymbolKind, Visibility,
+};
 use tree_sitter::Language as TsLanguage;
 
 pub struct TypeScriptLanguage;
@@ -27,7 +29,7 @@ impl TypeScriptLanguage {
     }
 
     /// Determine visibility: exported items are Public.
-    fn is_exported(node: &tree_sitter::Node, source: &[u8]) -> bool {
+    fn is_exported(node: &tree_sitter::Node, _source: &[u8]) -> bool {
         // Check for "export" keyword as a sibling or parent context.
         // In the tree-sitter TS grammar, exported declarations appear inside
         // an `export_statement` node, so we look at the parent.
@@ -75,7 +77,10 @@ impl TypeScriptLanguage {
         let text = Self::node_text(node, source);
         // Extract the module path (after "from")
         let source_path = if let Some(from_idx) = text.rfind(" from ") {
-            text[from_idx + 6..].trim().trim_matches(|c| c == '\'' || c == '"' || c == ';').to_string()
+            text[from_idx + 6..]
+                .trim()
+                .trim_matches(|c| c == '\'' || c == '"' || c == ';')
+                .to_string()
         } else {
             String::new()
         };
@@ -96,14 +101,25 @@ impl TypeScriptLanguage {
         } else {
             // "import defaultExport from 'module'"
             let after_import = text.trim_start_matches("import").trim();
-            let name = after_import.split_whitespace().next().unwrap_or("").to_string();
-            if name.is_empty() || name == "from" { vec![] } else { vec![name] }
+            let name = after_import
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_string();
+            if name.is_empty() || name == "from" {
+                vec![]
+            } else {
+                vec![name]
+            }
         };
 
         if source_path.is_empty() && names.is_empty() {
             None
         } else {
-            Some(Import { source: source_path, names })
+            Some(Import {
+                source: source_path,
+                names,
+            })
         }
     }
 }
@@ -147,83 +163,162 @@ impl LanguageSupport for TypeScriptLanguage {
                 "function_declaration" => {
                     let name = Self::extract_name(&node, source_bytes);
                     let is_pub = Self::is_exported(&node, source_bytes);
-                    let visibility = if is_pub { Visibility::Public } else { Visibility::Private };
+                    let visibility = if is_pub {
+                        Visibility::Public
+                    } else {
+                        Visibility::Private
+                    };
                     let signature = Self::extract_fn_signature(&node, source_bytes);
                     let body = Self::extract_fn_body(&node, source_bytes);
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
                     if is_pub {
-                        exports.push(Export { name: name.clone(), kind: SymbolKind::Function });
+                        exports.push(Export {
+                            name: name.clone(),
+                            kind: SymbolKind::Function,
+                        });
                     }
-                    symbols.push(Symbol { name, kind: SymbolKind::Function, visibility, signature, body, start_line, end_line });
+                    symbols.push(Symbol {
+                        name,
+                        kind: SymbolKind::Function,
+                        visibility,
+                        signature,
+                        body,
+                        start_line,
+                        end_line,
+                    });
                 }
 
                 "class_declaration" => {
                     let name = Self::extract_name(&node, source_bytes);
                     let is_pub = Self::is_exported(&node, source_bytes);
-                    let visibility = if is_pub { Visibility::Public } else { Visibility::Private };
+                    let visibility = if is_pub {
+                        Visibility::Public
+                    } else {
+                        Visibility::Private
+                    };
                     let signature = Self::first_line(&node, source_bytes);
                     let body = Self::node_text(&node, source_bytes).to_string();
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
                     if is_pub {
-                        exports.push(Export { name: name.clone(), kind: SymbolKind::Class });
+                        exports.push(Export {
+                            name: name.clone(),
+                            kind: SymbolKind::Class,
+                        });
                     }
-                    symbols.push(Symbol { name, kind: SymbolKind::Class, visibility, signature, body, start_line, end_line });
+                    symbols.push(Symbol {
+                        name,
+                        kind: SymbolKind::Class,
+                        visibility,
+                        signature,
+                        body,
+                        start_line,
+                        end_line,
+                    });
                 }
 
                 "interface_declaration" => {
                     let name = Self::extract_name(&node, source_bytes);
                     let is_pub = Self::is_exported(&node, source_bytes);
-                    let visibility = if is_pub { Visibility::Public } else { Visibility::Private };
+                    let visibility = if is_pub {
+                        Visibility::Public
+                    } else {
+                        Visibility::Private
+                    };
                     let signature = Self::first_line(&node, source_bytes);
                     let body = Self::node_text(&node, source_bytes).to_string();
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
                     if is_pub {
-                        exports.push(Export { name: name.clone(), kind: SymbolKind::Interface });
+                        exports.push(Export {
+                            name: name.clone(),
+                            kind: SymbolKind::Interface,
+                        });
                     }
-                    symbols.push(Symbol { name, kind: SymbolKind::Interface, visibility, signature, body, start_line, end_line });
+                    symbols.push(Symbol {
+                        name,
+                        kind: SymbolKind::Interface,
+                        visibility,
+                        signature,
+                        body,
+                        start_line,
+                        end_line,
+                    });
                 }
 
                 "type_alias_declaration" => {
                     let name = Self::extract_name(&node, source_bytes);
                     let is_pub = Self::is_exported(&node, source_bytes);
-                    let visibility = if is_pub { Visibility::Public } else { Visibility::Private };
+                    let visibility = if is_pub {
+                        Visibility::Public
+                    } else {
+                        Visibility::Private
+                    };
                     let signature = Self::first_line(&node, source_bytes);
                     let body = Self::node_text(&node, source_bytes).to_string();
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
                     if is_pub {
-                        exports.push(Export { name: name.clone(), kind: SymbolKind::TypeAlias });
+                        exports.push(Export {
+                            name: name.clone(),
+                            kind: SymbolKind::TypeAlias,
+                        });
                     }
-                    symbols.push(Symbol { name, kind: SymbolKind::TypeAlias, visibility, signature, body, start_line, end_line });
+                    symbols.push(Symbol {
+                        name,
+                        kind: SymbolKind::TypeAlias,
+                        visibility,
+                        signature,
+                        body,
+                        start_line,
+                        end_line,
+                    });
                 }
 
                 "enum_declaration" => {
                     let name = Self::extract_name(&node, source_bytes);
                     let is_pub = Self::is_exported(&node, source_bytes);
-                    let visibility = if is_pub { Visibility::Public } else { Visibility::Private };
+                    let visibility = if is_pub {
+                        Visibility::Public
+                    } else {
+                        Visibility::Private
+                    };
                     let signature = Self::first_line(&node, source_bytes);
                     let body = Self::node_text(&node, source_bytes).to_string();
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
                     if is_pub {
-                        exports.push(Export { name: name.clone(), kind: SymbolKind::Enum });
+                        exports.push(Export {
+                            name: name.clone(),
+                            kind: SymbolKind::Enum,
+                        });
                     }
-                    symbols.push(Symbol { name, kind: SymbolKind::Enum, visibility, signature, body, start_line, end_line });
+                    symbols.push(Symbol {
+                        name,
+                        kind: SymbolKind::Enum,
+                        visibility,
+                        signature,
+                        body,
+                        start_line,
+                        end_line,
+                    });
                 }
 
                 _ => {}
             }
         }
 
-        ParseResult { symbols, imports, exports }
+        ParseResult {
+            symbols,
+            imports,
+            exports,
+        }
     }
 }
 
@@ -251,13 +346,21 @@ mod tests {
         let lang = TypeScriptLanguage;
         let result = lang.extract(source, &tree);
 
-        let funcs: Vec<_> = result.symbols.iter().filter(|s| s.kind == SymbolKind::Function).collect();
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
         assert!(!funcs.is_empty(), "expected at least one function symbol");
         let sym = funcs[0];
         assert_eq!(sym.name, "greet");
         assert_eq!(sym.visibility, Visibility::Public);
 
-        let exported: Vec<_> = result.exports.iter().filter(|e| e.name == "greet").collect();
+        let exported: Vec<_> = result
+            .exports
+            .iter()
+            .filter(|e| e.name == "greet")
+            .collect();
         assert!(!exported.is_empty(), "greet should be exported");
     }
 
@@ -273,7 +376,11 @@ mod tests {
         let lang = TypeScriptLanguage;
         let result = lang.extract(source, &tree);
 
-        let interfaces: Vec<_> = result.symbols.iter().filter(|s| s.kind == SymbolKind::Interface).collect();
+        let interfaces: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Interface)
+            .collect();
         assert!(!interfaces.is_empty(), "expected interface symbol");
         assert_eq!(interfaces[0].name, "Animal");
         assert_eq!(interfaces[0].visibility, Visibility::Public);
@@ -304,7 +411,11 @@ mod tests {
         let lang = TypeScriptLanguage;
         let result = lang.extract(source, &tree);
 
-        let aliases: Vec<_> = result.symbols.iter().filter(|s| s.kind == SymbolKind::TypeAlias).collect();
+        let aliases: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::TypeAlias)
+            .collect();
         assert!(!aliases.is_empty(), "expected type alias symbol");
         assert_eq!(aliases[0].name, "UserId");
     }

@@ -1,4 +1,6 @@
-use crate::parser::language::{Export, Import, LanguageSupport, ParseResult, Symbol, SymbolKind, Visibility};
+use crate::parser::language::{
+    Export, Import, LanguageSupport, ParseResult, Symbol, SymbolKind, Visibility,
+};
 use tree_sitter::Language as TsLanguage;
 
 pub struct RustLanguage;
@@ -190,7 +192,11 @@ impl LanguageSupport for RustLanguage {
                 "function_item" => {
                     let name = Self::extract_name(&node, source_bytes);
                     let is_pub = Self::is_public(&node, source_bytes);
-                    let visibility = if is_pub { Visibility::Public } else { Visibility::Private };
+                    let visibility = if is_pub {
+                        Visibility::Public
+                    } else {
+                        Visibility::Private
+                    };
                     let signature = Self::extract_fn_signature(&node, source_bytes);
                     let body = Self::extract_fn_body(&node, source_bytes);
                     let start_line = node.start_position().row + 1;
@@ -217,7 +223,11 @@ impl LanguageSupport for RustLanguage {
                 "struct_item" => {
                     let name = Self::extract_name(&node, source_bytes);
                     let is_pub = Self::is_public(&node, source_bytes);
-                    let visibility = if is_pub { Visibility::Public } else { Visibility::Private };
+                    let visibility = if is_pub {
+                        Visibility::Public
+                    } else {
+                        Visibility::Private
+                    };
                     let signature = Self::type_signature(&node, source_bytes);
                     let body = Self::node_text(&node, source_bytes).to_string();
                     let start_line = node.start_position().row + 1;
@@ -244,7 +254,11 @@ impl LanguageSupport for RustLanguage {
                 "enum_item" => {
                     let name = Self::extract_name(&node, source_bytes);
                     let is_pub = Self::is_public(&node, source_bytes);
-                    let visibility = if is_pub { Visibility::Public } else { Visibility::Private };
+                    let visibility = if is_pub {
+                        Visibility::Public
+                    } else {
+                        Visibility::Private
+                    };
                     let signature = Self::type_signature(&node, source_bytes);
                     let body = Self::node_text(&node, source_bytes).to_string();
                     let start_line = node.start_position().row + 1;
@@ -271,7 +285,11 @@ impl LanguageSupport for RustLanguage {
                 "trait_item" => {
                     let name = Self::extract_name(&node, source_bytes);
                     let is_pub = Self::is_public(&node, source_bytes);
-                    let visibility = if is_pub { Visibility::Public } else { Visibility::Private };
+                    let visibility = if is_pub {
+                        Visibility::Public
+                    } else {
+                        Visibility::Private
+                    };
                     let signature = Self::first_line(&node, source_bytes);
                     let body = Self::node_text(&node, source_bytes).to_string();
                     let start_line = node.start_position().row + 1;
@@ -357,7 +375,11 @@ pub fn greet(name: &str) -> String {
         assert_eq!(sym.name, "greet");
         assert_eq!(sym.kind, SymbolKind::Function);
         assert_eq!(sym.visibility, Visibility::Public);
-        assert!(sym.signature.contains("pub fn greet"), "signature: {}", sym.signature);
+        assert!(
+            sym.signature.contains("pub fn greet"),
+            "signature: {}",
+            sym.signature
+        );
         assert!(sym.body.contains("format!"), "body: {}", sym.body);
 
         assert_eq!(result.exports.len(), 1);
@@ -381,10 +403,17 @@ fn helper(x: i32) -> i32 {
         assert_eq!(sym.name, "helper");
         assert_eq!(sym.kind, SymbolKind::Function);
         assert_eq!(sym.visibility, Visibility::Private);
-        assert!(sym.signature.contains("fn helper"), "signature: {}", sym.signature);
+        assert!(
+            sym.signature.contains("fn helper"),
+            "signature: {}",
+            sym.signature
+        );
         assert!(sym.body.contains("x * 2"), "body: {}", sym.body);
 
-        assert!(result.exports.is_empty(), "private function should not be exported");
+        assert!(
+            result.exports.is_empty(),
+            "private function should not be exported"
+        );
     }
 
     #[test]
@@ -405,7 +434,11 @@ pub struct Point {
         assert_eq!(sym.name, "Point");
         assert_eq!(sym.kind, SymbolKind::Struct);
         assert_eq!(sym.visibility, Visibility::Public);
-        assert!(sym.signature.contains("pub struct Point"), "signature: {}", sym.signature);
+        assert!(
+            sym.signature.contains("pub struct Point"),
+            "signature: {}",
+            sym.signature
+        );
 
         assert_eq!(result.exports.len(), 1);
         assert_eq!(result.exports[0].name, "Point");
@@ -432,7 +465,11 @@ pub enum Direction {
         assert_eq!(sym.name, "Direction");
         assert_eq!(sym.kind, SymbolKind::Enum);
         assert_eq!(sym.visibility, Visibility::Public);
-        assert!(sym.signature.contains("pub enum Direction"), "signature: {}", sym.signature);
+        assert!(
+            sym.signature.contains("pub enum Direction"),
+            "signature: {}",
+            sym.signature
+        );
 
         assert_eq!(result.exports.len(), 1);
         assert_eq!(result.exports[0].name, "Direction");
@@ -457,7 +494,11 @@ pub trait Animal {
         assert_eq!(sym.name, "Animal");
         assert_eq!(sym.kind, SymbolKind::Trait);
         assert_eq!(sym.visibility, Visibility::Public);
-        assert!(sym.signature.contains("pub trait Animal"), "signature: {}", sym.signature);
+        assert!(
+            sym.signature.contains("pub trait Animal"),
+            "signature: {}",
+            sym.signature
+        );
 
         assert_eq!(result.exports.len(), 1);
         assert_eq!(result.exports[0].name, "Animal");
@@ -483,8 +524,16 @@ use std::io::{Read, Write};
 
         let second = &result.imports[1];
         assert_eq!(second.source, "std::io");
-        assert!(second.names.contains(&"Read".to_string()), "names: {:?}", second.names);
-        assert!(second.names.contains(&"Write".to_string()), "names: {:?}", second.names);
+        assert!(
+            second.names.contains(&"Read".to_string()),
+            "names: {:?}",
+            second.names
+        );
+        assert!(
+            second.names.contains(&"Write".to_string()),
+            "names: {:?}",
+            second.names
+        );
     }
 
     #[test]
@@ -516,16 +565,39 @@ impl Counter {
             .filter(|s| s.kind == SymbolKind::Method)
             .collect();
 
-        assert_eq!(methods.len(), 2, "expected 2 methods, got: {:?}", methods.iter().map(|m| &m.name).collect::<Vec<_>>());
+        assert_eq!(
+            methods.len(),
+            2,
+            "expected 2 methods, got: {:?}",
+            methods.iter().map(|m| &m.name).collect::<Vec<_>>()
+        );
 
-        let increment = methods.iter().find(|m| m.name == "increment").expect("increment method not found");
+        let increment = methods
+            .iter()
+            .find(|m| m.name == "increment")
+            .expect("increment method not found");
         assert_eq!(increment.visibility, Visibility::Public);
-        assert!(increment.signature.contains("pub fn increment"), "sig: {}", increment.signature);
-        assert!(increment.body.contains("self.count += 1"), "body: {}", increment.body);
+        assert!(
+            increment.signature.contains("pub fn increment"),
+            "sig: {}",
+            increment.signature
+        );
+        assert!(
+            increment.body.contains("self.count += 1"),
+            "body: {}",
+            increment.body
+        );
 
-        let reset = methods.iter().find(|m| m.name == "reset").expect("reset method not found");
+        let reset = methods
+            .iter()
+            .find(|m| m.name == "reset")
+            .expect("reset method not found");
         assert_eq!(reset.visibility, Visibility::Private);
-        assert!(reset.signature.contains("fn reset"), "sig: {}", reset.signature);
+        assert!(
+            reset.signature.contains("fn reset"),
+            "sig: {}",
+            reset.signature
+        );
 
         // Only public method should be exported
         let method_exports: Vec<&Export> = result

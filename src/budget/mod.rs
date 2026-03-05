@@ -18,7 +18,11 @@ impl BudgetAllocation {
     pub fn allocate(total_budget: usize) -> Self {
         let remaining = total_budget.saturating_sub(METADATA_FIXED);
         Self {
-            metadata: if total_budget >= METADATA_FIXED { METADATA_FIXED } else { total_budget },
+            metadata: if total_budget >= METADATA_FIXED {
+                METADATA_FIXED
+            } else {
+                total_budget
+            },
             directory_tree: (remaining as f64 * 0.05) as usize,
             module_map: (remaining as f64 * 0.20) as usize,
             dependency_graph: (remaining as f64 * 0.15) as usize,
@@ -29,8 +33,13 @@ impl BudgetAllocation {
     }
 
     pub fn total(&self) -> usize {
-        self.metadata + self.directory_tree + self.module_map + self.dependency_graph
-            + self.key_files + self.signatures + self.git_context
+        self.metadata
+            + self.directory_tree
+            + self.module_map
+            + self.dependency_graph
+            + self.key_files
+            + self.signatures
+            + self.git_context
     }
 }
 

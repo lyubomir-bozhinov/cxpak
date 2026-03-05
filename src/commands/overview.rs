@@ -153,11 +153,7 @@ fn render_metadata(index: &CodebaseIndex) -> String {
     out
 }
 
-fn render_directory_tree(
-    index: &CodebaseIndex,
-    budget: usize,
-    counter: &TokenCounter,
-) -> String {
+fn render_directory_tree(index: &CodebaseIndex, budget: usize, counter: &TokenCounter) -> String {
     let mut tree = String::new();
     for file in &index.files {
         tree.push_str(&file.relative_path);
@@ -168,11 +164,7 @@ fn render_directory_tree(
     result
 }
 
-fn render_module_map(
-    index: &CodebaseIndex,
-    budget: usize,
-    counter: &TokenCounter,
-) -> String {
+fn render_module_map(index: &CodebaseIndex, budget: usize, counter: &TokenCounter) -> String {
     let mut out = String::new();
 
     for file in &index.files {
@@ -186,10 +178,7 @@ fn render_module_map(
                     crate::parser::language::Visibility::Public => "pub ",
                     crate::parser::language::Visibility::Private => "",
                 };
-                out.push_str(&format!(
-                    "- {}{:?}: `{}`\n",
-                    vis, sym.kind, sym.name
-                ));
+                out.push_str(&format!("- {}{:?}: `{}`\n", vis, sym.kind, sym.name));
             }
             out.push('\n');
         }
@@ -199,11 +188,7 @@ fn render_module_map(
     result
 }
 
-fn render_dependency_graph(
-    index: &CodebaseIndex,
-    budget: usize,
-    counter: &TokenCounter,
-) -> String {
+fn render_dependency_graph(index: &CodebaseIndex, budget: usize, counter: &TokenCounter) -> String {
     let mut out = String::new();
 
     for file in &index.files {
@@ -216,27 +201,18 @@ fn render_dependency_graph(
                 if imp.names.is_empty() {
                     out.push_str(&format!("- `{}`\n", imp.source));
                 } else {
-                    out.push_str(&format!(
-                        "- `{}` — {}\n",
-                        imp.source,
-                        imp.names.join(", ")
-                    ));
+                    out.push_str(&format!("- `{}` — {}\n", imp.source, imp.names.join(", ")));
                 }
             }
             out.push('\n');
         }
     }
 
-    let (result, _, _) =
-        degrader::truncate_to_budget(&out, budget, counter, "dependency graph");
+    let (result, _, _) = degrader::truncate_to_budget(&out, budget, counter, "dependency graph");
     result
 }
 
-fn render_key_files(
-    index: &CodebaseIndex,
-    budget: usize,
-    counter: &TokenCounter,
-) -> String {
+fn render_key_files(index: &CodebaseIndex, budget: usize, counter: &TokenCounter) -> String {
     let mut out = String::new();
     let mut remaining = budget;
 
@@ -279,11 +255,7 @@ fn render_key_files(
     out
 }
 
-fn render_signatures(
-    index: &CodebaseIndex,
-    budget: usize,
-    counter: &TokenCounter,
-) -> String {
+fn render_signatures(index: &CodebaseIndex, budget: usize, counter: &TokenCounter) -> String {
     let mut out = String::new();
 
     for file in &index.files {
@@ -309,11 +281,7 @@ fn render_signatures(
     result
 }
 
-fn render_git_context(
-    path: &Path,
-    budget: usize,
-    counter: &TokenCounter,
-) -> String {
+fn render_git_context(path: &Path, budget: usize, counter: &TokenCounter) -> String {
     let ctx = match git::extract_git_context(path, 20) {
         Ok(ctx) => ctx,
         Err(_) => return String::new(),

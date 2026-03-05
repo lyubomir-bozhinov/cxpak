@@ -8,6 +8,12 @@ pub struct LanguageRegistry {
     languages: HashMap<String, Box<dyn LanguageSupport>>,
 }
 
+impl Default for LanguageRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LanguageRegistry {
     pub fn new() -> Self {
         let mut registry = Self {

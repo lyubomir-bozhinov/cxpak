@@ -1,4 +1,6 @@
-use crate::parser::language::{Export, Import, LanguageSupport, ParseResult, Symbol, SymbolKind, Visibility};
+use crate::parser::language::{
+    Export, Import, LanguageSupport, ParseResult, Symbol, SymbolKind, Visibility,
+};
 use tree_sitter::Language as TsLanguage;
 
 pub struct PythonLanguage;
@@ -104,7 +106,11 @@ impl PythonLanguage {
                     if item.kind() == "function_definition" {
                         let name = Self::extract_name(&item, source);
                         let is_pub = Self::is_public(&name);
-                        let visibility = if is_pub { Visibility::Public } else { Visibility::Private };
+                        let visibility = if is_pub {
+                            Visibility::Public
+                        } else {
+                            Visibility::Private
+                        };
                         let signature = Self::extract_fn_signature(&item, source);
                         let body = Self::extract_fn_body(&item, source);
                         let start_line = item.start_position().row + 1;
@@ -150,7 +156,11 @@ impl LanguageSupport for PythonLanguage {
                 "function_definition" => {
                     let name = Self::extract_name(&node, source_bytes);
                     let is_pub = Self::is_public(&name);
-                    let visibility = if is_pub { Visibility::Public } else { Visibility::Private };
+                    let visibility = if is_pub {
+                        Visibility::Public
+                    } else {
+                        Visibility::Private
+                    };
                     let signature = Self::extract_fn_signature(&node, source_bytes);
                     let body = Self::extract_fn_body(&node, source_bytes);
                     let start_line = node.start_position().row + 1;
@@ -177,7 +187,11 @@ impl LanguageSupport for PythonLanguage {
                 "class_definition" => {
                     let name = Self::extract_name(&node, source_bytes);
                     let is_pub = Self::is_public(&name);
-                    let visibility = if is_pub { Visibility::Public } else { Visibility::Private };
+                    let visibility = if is_pub {
+                        Visibility::Public
+                    } else {
+                        Visibility::Private
+                    };
                     let signature = Self::first_line(&node, source_bytes);
                     let body = Self::node_text(&node, source_bytes).to_string();
                     let start_line = node.start_position().row + 1;
@@ -259,7 +273,11 @@ mod tests {
         assert_eq!(sym.name, "greet");
         assert_eq!(sym.kind, SymbolKind::Function);
         assert_eq!(sym.visibility, Visibility::Public);
-        assert!(sym.signature.contains("def greet"), "signature: {}", sym.signature);
+        assert!(
+            sym.signature.contains("def greet"),
+            "signature: {}",
+            sym.signature
+        );
 
         assert_eq!(result.exports.len(), 1);
         assert_eq!(result.exports[0].name, "greet");
@@ -279,7 +297,10 @@ mod tests {
         let sym = &result.symbols[0];
         assert_eq!(sym.name, "_helper");
         assert_eq!(sym.visibility, Visibility::Private);
-        assert!(result.exports.is_empty(), "private function should not be exported");
+        assert!(
+            result.exports.is_empty(),
+            "private function should not be exported"
+        );
     }
 
     #[test]
@@ -296,7 +317,11 @@ mod tests {
         let lang = PythonLanguage;
         let result = lang.extract(source, &tree);
 
-        let classes: Vec<_> = result.symbols.iter().filter(|s| s.kind == SymbolKind::Class).collect();
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
         assert_eq!(classes.len(), 1);
         assert_eq!(classes[0].name, "Animal");
         assert_eq!(classes[0].visibility, Visibility::Public);

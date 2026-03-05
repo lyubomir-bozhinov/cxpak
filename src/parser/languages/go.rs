@@ -1,4 +1,6 @@
-use crate::parser::language::{Export, Import, LanguageSupport, ParseResult, Symbol, SymbolKind, Visibility};
+use crate::parser::language::{
+    Export, Import, LanguageSupport, ParseResult, Symbol, SymbolKind, Visibility,
+};
 use tree_sitter::Language as TsLanguage;
 
 pub struct GoLanguage;
@@ -16,7 +18,10 @@ impl GoLanguage {
     fn extract_name(node: &tree_sitter::Node, source: &[u8]) -> String {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "identifier" || child.kind() == "type_identifier" || child.kind() == "field_identifier" {
+            if child.kind() == "identifier"
+                || child.kind() == "type_identifier"
+                || child.kind() == "field_identifier"
+            {
                 return Self::node_text(&child, source).to_string();
             }
         }
@@ -25,7 +30,10 @@ impl GoLanguage {
 
     /// In Go, an identifier starting with an uppercase letter is exported (public).
     fn is_public(name: &str) -> bool {
-        name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+        name.chars()
+            .next()
+            .map(|c| c.is_uppercase())
+            .unwrap_or(false)
     }
 
     fn extract_fn_signature(node: &tree_sitter::Node, source: &[u8]) -> String {
@@ -108,7 +116,7 @@ impl GoLanguage {
             alias
         } else {
             // Default name is last segment of import path
-            path.split('/').last().unwrap_or(&path).to_string()
+            path.rsplit('/').next().unwrap_or(&path).to_string()
         };
 
         Some(Import {
@@ -146,31 +154,61 @@ impl LanguageSupport for GoLanguage {
                 "function_declaration" => {
                     let name = Self::extract_name(&node, source_bytes);
                     let is_pub = Self::is_public(&name);
-                    let visibility = if is_pub { Visibility::Public } else { Visibility::Private };
+                    let visibility = if is_pub {
+                        Visibility::Public
+                    } else {
+                        Visibility::Private
+                    };
                     let signature = Self::extract_fn_signature(&node, source_bytes);
                     let body = Self::extract_fn_body(&node, source_bytes);
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
                     if is_pub {
-                        exports.push(Export { name: name.clone(), kind: SymbolKind::Function });
+                        exports.push(Export {
+                            name: name.clone(),
+                            kind: SymbolKind::Function,
+                        });
                     }
-                    symbols.push(Symbol { name, kind: SymbolKind::Function, visibility, signature, body, start_line, end_line });
+                    symbols.push(Symbol {
+                        name,
+                        kind: SymbolKind::Function,
+                        visibility,
+                        signature,
+                        body,
+                        start_line,
+                        end_line,
+                    });
                 }
 
                 "method_declaration" => {
                     let name = Self::extract_name(&node, source_bytes);
                     let is_pub = Self::is_public(&name);
-                    let visibility = if is_pub { Visibility::Public } else { Visibility::Private };
+                    let visibility = if is_pub {
+                        Visibility::Public
+                    } else {
+                        Visibility::Private
+                    };
                     let signature = Self::extract_fn_signature(&node, source_bytes);
                     let body = Self::extract_fn_body(&node, source_bytes);
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
                     if is_pub {
-                        exports.push(Export { name: name.clone(), kind: SymbolKind::Method });
+                        exports.push(Export {
+                            name: name.clone(),
+                            kind: SymbolKind::Method,
+                        });
                     }
-                    symbols.push(Symbol { name, kind: SymbolKind::Method, visibility, signature, body, start_line, end_line });
+                    symbols.push(Symbol {
+                        name,
+                        kind: SymbolKind::Method,
+                        visibility,
+                        signature,
+                        body,
+                        start_line,
+                        end_line,
+                    });
                 }
 
                 "type_declaration" => {
@@ -180,7 +218,11 @@ impl LanguageSupport for GoLanguage {
                         if child.kind() == "type_spec" {
                             let name = Self::extract_name(&child, source_bytes);
                             let is_pub = Self::is_public(&name);
-                            let visibility = if is_pub { Visibility::Public } else { Visibility::Private };
+                            let visibility = if is_pub {
+                                Visibility::Public
+                            } else {
+                                Visibility::Private
+                            };
                             let signature = Self::first_line(&child, source_bytes);
                             let body = Self::node_text(&child, source_bytes).to_string();
                             let start_line = child.start_position().row + 1;
@@ -192,8 +234,14 @@ impl LanguageSupport for GoLanguage {
                                 let mut found_kind = SymbolKind::Struct;
                                 for spec_child in child.children(&mut spec_cursor) {
                                     match spec_child.kind() {
-                                        "struct_type" => { found_kind = SymbolKind::Struct; break; }
-                                        "interface_type" => { found_kind = SymbolKind::Interface; break; }
+                                        "struct_type" => {
+                                            found_kind = SymbolKind::Struct;
+                                            break;
+                                        }
+                                        "interface_type" => {
+                                            found_kind = SymbolKind::Interface;
+                                            break;
+                                        }
                                         _ => {}
                                     }
                                 }
@@ -201,9 +249,20 @@ impl LanguageSupport for GoLanguage {
                             };
 
                             if is_pub {
-                                exports.push(Export { name: name.clone(), kind: kind.clone() });
+                                exports.push(Export {
+                                    name: name.clone(),
+                                    kind: kind.clone(),
+                                });
                             }
-                            symbols.push(Symbol { name, kind, visibility, signature, body, start_line, end_line });
+                            symbols.push(Symbol {
+                                name,
+                                kind,
+                                visibility,
+                                signature,
+                                body,
+                                start_line,
+                                end_line,
+                            });
                         }
                     }
                 }
@@ -212,7 +271,11 @@ impl LanguageSupport for GoLanguage {
             }
         }
 
-        ParseResult { symbols, imports, exports }
+        ParseResult {
+            symbols,
+            imports,
+            exports,
+        }
     }
 }
 
@@ -242,12 +305,20 @@ func Greet(name string) string {
         let lang = GoLanguage;
         let result = lang.extract(source, &tree);
 
-        let funcs: Vec<_> = result.symbols.iter().filter(|s| s.kind == SymbolKind::Function).collect();
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
         assert!(!funcs.is_empty(), "expected function symbol");
         assert_eq!(funcs[0].name, "Greet");
         assert_eq!(funcs[0].visibility, Visibility::Public);
 
-        let exported: Vec<_> = result.exports.iter().filter(|e| e.name == "Greet").collect();
+        let exported: Vec<_> = result
+            .exports
+            .iter()
+            .filter(|e| e.name == "Greet")
+            .collect();
         assert!(!exported.is_empty(), "Greet should be exported");
     }
 
@@ -264,7 +335,11 @@ func helper(x int) int {
         let lang = GoLanguage;
         let result = lang.extract(source, &tree);
 
-        let funcs: Vec<_> = result.symbols.iter().filter(|s| s.kind == SymbolKind::Function).collect();
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
         assert!(!funcs.is_empty());
         assert_eq!(funcs[0].name, "helper");
         assert_eq!(funcs[0].visibility, Visibility::Private);
@@ -285,7 +360,11 @@ type Point struct {
         let lang = GoLanguage;
         let result = lang.extract(source, &tree);
 
-        let structs: Vec<_> = result.symbols.iter().filter(|s| s.kind == SymbolKind::Struct).collect();
+        let structs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Struct)
+            .collect();
         assert!(!structs.is_empty(), "expected struct symbol");
         assert_eq!(structs[0].name, "Point");
         assert_eq!(structs[0].visibility, Visibility::Public);

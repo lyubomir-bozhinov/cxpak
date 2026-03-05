@@ -1,4 +1,6 @@
-use crate::parser::language::{Export, Import, LanguageSupport, ParseResult, Symbol, SymbolKind, Visibility};
+use crate::parser::language::{
+    Export, Import, LanguageSupport, ParseResult, Symbol, SymbolKind, Visibility,
+};
 use tree_sitter::Language as TsLanguage;
 
 pub struct JavaLanguage;
@@ -88,9 +90,15 @@ impl JavaLanguage {
         if let Some(sep) = inner.rfind('.') {
             let source_path = inner[..sep].to_string();
             let name = inner[sep + 1..].to_string();
-            Some(Import { source: source_path, names: vec![name] })
+            Some(Import {
+                source: source_path,
+                names: vec![name],
+            })
         } else {
-            Some(Import { source: String::new(), names: vec![inner.to_string()] })
+            Some(Import {
+                source: String::new(),
+                names: vec![inner.to_string()],
+            })
         }
     }
 }
@@ -133,9 +141,20 @@ impl LanguageSupport for JavaLanguage {
                     let end_line = node.end_position().row + 1;
 
                     if is_pub {
-                        exports.push(Export { name: name.clone(), kind: SymbolKind::Class });
+                        exports.push(Export {
+                            name: name.clone(),
+                            kind: SymbolKind::Class,
+                        });
                     }
-                    symbols.push(Symbol { name, kind: SymbolKind::Class, visibility, signature, body, start_line, end_line });
+                    symbols.push(Symbol {
+                        name,
+                        kind: SymbolKind::Class,
+                        visibility,
+                        signature,
+                        body,
+                        start_line,
+                        end_line,
+                    });
 
                     // Recurse into class body to find methods
                     let mut cursor = node.walk();
@@ -154,9 +173,20 @@ impl LanguageSupport for JavaLanguage {
                     let end_line = node.end_position().row + 1;
 
                     if is_pub {
-                        exports.push(Export { name: name.clone(), kind: SymbolKind::Interface });
+                        exports.push(Export {
+                            name: name.clone(),
+                            kind: SymbolKind::Interface,
+                        });
                     }
-                    symbols.push(Symbol { name, kind: SymbolKind::Interface, visibility, signature, body, start_line, end_line });
+                    symbols.push(Symbol {
+                        name,
+                        kind: SymbolKind::Interface,
+                        visibility,
+                        signature,
+                        body,
+                        start_line,
+                        end_line,
+                    });
                 }
 
                 "enum_declaration" => {
@@ -169,9 +199,20 @@ impl LanguageSupport for JavaLanguage {
                     let end_line = node.end_position().row + 1;
 
                     if is_pub {
-                        exports.push(Export { name: name.clone(), kind: SymbolKind::Enum });
+                        exports.push(Export {
+                            name: name.clone(),
+                            kind: SymbolKind::Enum,
+                        });
                     }
-                    symbols.push(Symbol { name, kind: SymbolKind::Enum, visibility, signature, body, start_line, end_line });
+                    symbols.push(Symbol {
+                        name,
+                        kind: SymbolKind::Enum,
+                        visibility,
+                        signature,
+                        body,
+                        start_line,
+                        end_line,
+                    });
                 }
 
                 "method_declaration" => {
@@ -184,9 +225,20 @@ impl LanguageSupport for JavaLanguage {
                     let end_line = node.end_position().row + 1;
 
                     if is_pub {
-                        exports.push(Export { name: name.clone(), kind: SymbolKind::Method });
+                        exports.push(Export {
+                            name: name.clone(),
+                            kind: SymbolKind::Method,
+                        });
                     }
-                    symbols.push(Symbol { name, kind: SymbolKind::Method, visibility, signature, body, start_line, end_line });
+                    symbols.push(Symbol {
+                        name,
+                        kind: SymbolKind::Method,
+                        visibility,
+                        signature,
+                        body,
+                        start_line,
+                        end_line,
+                    });
                 }
 
                 "constructor_declaration" => {
@@ -199,9 +251,20 @@ impl LanguageSupport for JavaLanguage {
                     let end_line = node.end_position().row + 1;
 
                     if is_pub {
-                        exports.push(Export { name: name.clone(), kind: SymbolKind::Method });
+                        exports.push(Export {
+                            name: name.clone(),
+                            kind: SymbolKind::Method,
+                        });
                     }
-                    symbols.push(Symbol { name, kind: SymbolKind::Method, visibility, signature, body, start_line, end_line });
+                    symbols.push(Symbol {
+                        name,
+                        kind: SymbolKind::Method,
+                        visibility,
+                        signature,
+                        body,
+                        start_line,
+                        end_line,
+                    });
                 }
 
                 // Recurse into class/interface bodies to find methods
@@ -216,7 +279,11 @@ impl LanguageSupport for JavaLanguage {
             }
         }
 
-        ParseResult { symbols, imports, exports }
+        ParseResult {
+            symbols,
+            imports,
+            exports,
+        }
     }
 }
 
@@ -246,12 +313,20 @@ mod tests {
         let lang = JavaLanguage;
         let result = lang.extract(source, &tree);
 
-        let classes: Vec<_> = result.symbols.iter().filter(|s| s.kind == SymbolKind::Class).collect();
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
         assert!(!classes.is_empty(), "expected class symbol");
         assert_eq!(classes[0].name, "HelloWorld");
         assert_eq!(classes[0].visibility, Visibility::Public);
 
-        let exported: Vec<_> = result.exports.iter().filter(|e| e.name == "HelloWorld").collect();
+        let exported: Vec<_> = result
+            .exports
+            .iter()
+            .filter(|e| e.name == "HelloWorld")
+            .collect();
         assert!(!exported.is_empty(), "HelloWorld should be exported");
     }
 
@@ -266,9 +341,21 @@ import java.util.HashMap;
         let result = lang.extract(source, &tree);
 
         assert_eq!(result.imports.len(), 2);
-        let names: Vec<&str> = result.imports.iter().flat_map(|i| i.names.iter().map(|n| n.as_str())).collect();
-        assert!(names.contains(&"List"), "expected List import, got: {:?}", names);
-        assert!(names.contains(&"HashMap"), "expected HashMap import, got: {:?}", names);
+        let names: Vec<&str> = result
+            .imports
+            .iter()
+            .flat_map(|i| i.names.iter().map(|n| n.as_str()))
+            .collect();
+        assert!(
+            names.contains(&"List"),
+            "expected List import, got: {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"HashMap"),
+            "expected HashMap import, got: {:?}",
+            names
+        );
     }
 
     #[test]
@@ -283,13 +370,23 @@ import java.util.HashMap;
         let lang = JavaLanguage;
         let result = lang.extract(source, &tree);
 
-        let methods: Vec<_> = result.symbols.iter().filter(|s| s.kind == SymbolKind::Method).collect();
+        let methods: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Method)
+            .collect();
         assert_eq!(methods.len(), 2);
 
-        let pub_method = methods.iter().find(|m| m.name == "publicMethod").expect("publicMethod not found");
+        let pub_method = methods
+            .iter()
+            .find(|m| m.name == "publicMethod")
+            .expect("publicMethod not found");
         assert_eq!(pub_method.visibility, Visibility::Public);
 
-        let priv_method = methods.iter().find(|m| m.name == "privateMethod").expect("privateMethod not found");
+        let priv_method = methods
+            .iter()
+            .find(|m| m.name == "privateMethod")
+            .expect("privateMethod not found");
         assert_eq!(priv_method.visibility, Visibility::Private);
     }
 }

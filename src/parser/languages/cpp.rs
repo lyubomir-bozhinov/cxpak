@@ -1,4 +1,6 @@
-use crate::parser::language::{Export, Import, LanguageSupport, ParseResult, Symbol, SymbolKind, Visibility};
+use crate::parser::language::{
+    Export, Import, LanguageSupport, ParseResult, Symbol, SymbolKind, Visibility,
+};
 use tree_sitter::Language as TsLanguage;
 
 pub struct CppLanguage;
@@ -28,7 +30,9 @@ impl CppLanguage {
                     let text = Self::node_text(&child, source);
                     return text.split("::").last().unwrap_or("").to_string();
                 }
-                "function_declarator" | "pointer_declarator" | "reference_declarator"
+                "function_declarator"
+                | "pointer_declarator"
+                | "reference_declarator"
                 | "abstract_pointer_declarator" => {
                     let name = Self::find_fn_identifier(&child, source, depth + 1);
                     if !name.is_empty() {
@@ -154,7 +158,10 @@ impl LanguageSupport for CppLanguage {
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
-                    exports.push(Export { name: name.clone(), kind: SymbolKind::Function });
+                    exports.push(Export {
+                        name: name.clone(),
+                        kind: SymbolKind::Function,
+                    });
                     symbols.push(Symbol {
                         name,
                         kind: SymbolKind::Function,
@@ -176,7 +183,10 @@ impl LanguageSupport for CppLanguage {
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
-                    exports.push(Export { name: name.clone(), kind: SymbolKind::Struct });
+                    exports.push(Export {
+                        name: name.clone(),
+                        kind: SymbolKind::Struct,
+                    });
                     symbols.push(Symbol {
                         name,
                         kind: SymbolKind::Struct,
@@ -198,7 +208,10 @@ impl LanguageSupport for CppLanguage {
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
-                    exports.push(Export { name: name.clone(), kind: SymbolKind::Class });
+                    exports.push(Export {
+                        name: name.clone(),
+                        kind: SymbolKind::Class,
+                    });
                     symbols.push(Symbol {
                         name,
                         kind: SymbolKind::Class,
@@ -220,7 +233,10 @@ impl LanguageSupport for CppLanguage {
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
-                    exports.push(Export { name: name.clone(), kind: SymbolKind::Enum });
+                    exports.push(Export {
+                        name: name.clone(),
+                        kind: SymbolKind::Enum,
+                    });
                     symbols.push(Symbol {
                         name,
                         kind: SymbolKind::Enum,
@@ -243,7 +259,10 @@ impl LanguageSupport for CppLanguage {
                     let end_line = node.end_position().row + 1;
 
                     // Namespaces are always accessible (treat as public)
-                    exports.push(Export { name: name.clone(), kind: SymbolKind::Struct });
+                    exports.push(Export {
+                        name: name.clone(),
+                        kind: SymbolKind::Struct,
+                    });
                     symbols.push(Symbol {
                         name,
                         kind: SymbolKind::Struct,
@@ -265,7 +284,10 @@ impl LanguageSupport for CppLanguage {
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
-                    exports.push(Export { name: name.clone(), kind: SymbolKind::TypeAlias });
+                    exports.push(Export {
+                        name: name.clone(),
+                        kind: SymbolKind::TypeAlias,
+                    });
                     symbols.push(Symbol {
                         name,
                         kind: SymbolKind::TypeAlias,
@@ -281,14 +303,21 @@ impl LanguageSupport for CppLanguage {
                     let mut decl_cursor = node.walk();
                     for child in node.children(&mut decl_cursor) {
                         if child.kind() == "struct_specifier" || child.kind() == "class_specifier" {
-                            let kind = if child.kind() == "class_specifier" { SymbolKind::Class } else { SymbolKind::Struct };
+                            let kind = if child.kind() == "class_specifier" {
+                                SymbolKind::Class
+                            } else {
+                                SymbolKind::Struct
+                            };
                             let name = Self::extract_tag_name(&child, source_bytes);
                             if !name.is_empty() {
                                 let signature = Self::first_line(&child, source_bytes);
                                 let body = Self::node_text(&child, source_bytes).to_string();
                                 let start_line = child.start_position().row + 1;
                                 let end_line = child.end_position().row + 1;
-                                exports.push(Export { name: name.clone(), kind: kind.clone() });
+                                exports.push(Export {
+                                    name: name.clone(),
+                                    kind: kind.clone(),
+                                });
                                 symbols.push(Symbol {
                                     name,
                                     kind,
@@ -307,7 +336,11 @@ impl LanguageSupport for CppLanguage {
             }
         }
 
-        ParseResult { symbols, imports, exports }
+        ParseResult {
+            symbols,
+            imports,
+            exports,
+        }
     }
 }
 
@@ -335,11 +368,19 @@ mod tests {
         let lang = CppLanguage;
         let result = lang.extract(source, &tree);
 
-        let funcs: Vec<_> = result.symbols.iter().filter(|s| s.kind == SymbolKind::Function).collect();
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
         assert!(!funcs.is_empty(), "expected function symbol");
         assert_eq!(funcs[0].name, "add");
         assert_eq!(funcs[0].visibility, Visibility::Public);
-        assert!(funcs[0].signature.contains("int add(int a, int b)"), "signature: {}", funcs[0].signature);
+        assert!(
+            funcs[0].signature.contains("int add(int a, int b)"),
+            "signature: {}",
+            funcs[0].signature
+        );
     }
 
     #[test]
@@ -370,8 +411,20 @@ public:
         let lang = CppLanguage;
         let result = lang.extract(source, &tree);
 
-        let classes: Vec<_> = result.symbols.iter().filter(|s| s.kind == SymbolKind::Class).collect();
-        assert!(!classes.is_empty(), "expected class symbol, got: {:?}", result.symbols.iter().map(|s| (&s.name, &s.kind)).collect::<Vec<_>>());
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(
+            !classes.is_empty(),
+            "expected class symbol, got: {:?}",
+            result
+                .symbols
+                .iter()
+                .map(|s| (&s.name, &s.kind))
+                .collect::<Vec<_>>()
+        );
         assert_eq!(classes[0].name, "Point");
     }
 
@@ -384,7 +437,11 @@ public:
         let lang = CppLanguage;
         let result = lang.extract(source, &tree);
 
-        let typedefs: Vec<_> = result.symbols.iter().filter(|s| s.kind == SymbolKind::TypeAlias).collect();
+        let typedefs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::TypeAlias)
+            .collect();
         assert!(!typedefs.is_empty(), "expected typedef symbol");
         assert_eq!(typedefs[0].name, "uint32_t");
     }

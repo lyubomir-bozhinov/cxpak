@@ -23,7 +23,7 @@ fn main() {
             path,
         } => {
             let token_budget = match parse_token_count(tokens) {
-                Ok(n) if n == 0 => {
+                Ok(0) => {
                     eprintln!("Error: --tokens must be greater than 0");
                     std::process::exit(1);
                 }
@@ -44,7 +44,7 @@ fn main() {
             target,
         } => {
             let token_budget = match parse_token_count(tokens) {
-                Ok(n) if n == 0 => {
+                Ok(0) => {
                     eprintln!("Error: --tokens must be greater than 0");
                     std::process::exit(1);
                 }

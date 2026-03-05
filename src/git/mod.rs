@@ -42,7 +42,7 @@ pub struct GitContext {
 /// Format a Unix timestamp (seconds since epoch) as "YYYY-MM-DD" without chrono.
 fn format_date(unix_secs: i64) -> String {
     // Days since Unix epoch
-    let mut days = (unix_secs / 86_400) as i64;
+    let days = unix_secs / 86_400;
 
     // Offset negative timestamps to epoch if somehow negative
     if days < 0 {
@@ -91,10 +91,7 @@ pub fn extract_git_context(
         let commit = repo.find_commit(oid)?;
 
         let hash = format!("{:.7}", commit.id());
-        let message = commit
-            .summary()
-            .unwrap_or("")
-            .to_string();
+        let message = commit.summary().unwrap_or("").to_string();
         let author = commit.author().name().unwrap_or("Unknown").to_string();
         let date = format_date(commit.time().seconds());
 
@@ -115,11 +112,7 @@ pub fn extract_git_context(
         };
         let commit_tree = commit.tree()?;
 
-        let diff = repo.diff_tree_to_tree(
-            parent_tree.as_ref(),
-            Some(&commit_tree),
-            None,
-        )?;
+        let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&commit_tree), None)?;
 
         diff.foreach(
             &mut |delta, _progress| {
@@ -140,7 +133,11 @@ pub fn extract_git_context(
         .into_iter()
         .map(|(path, commit_count)| FileChurn { path, commit_count })
         .collect();
-    file_churn.sort_by(|a, b| b.commit_count.cmp(&a.commit_count).then(a.path.cmp(&b.path)));
+    file_churn.sort_by(|a, b| {
+        b.commit_count
+            .cmp(&a.commit_count)
+            .then(a.path.cmp(&b.path))
+    });
     file_churn.truncate(20);
 
     // Build contributor list
@@ -148,7 +145,11 @@ pub fn extract_git_context(
         .into_iter()
         .map(|(name, commit_count)| ContributorInfo { name, commit_count })
         .collect();
-    contributors.sort_by(|a, b| b.commit_count.cmp(&a.commit_count).then(a.name.cmp(&b.name)));
+    contributors.sort_by(|a, b| {
+        b.commit_count
+            .cmp(&a.commit_count)
+            .then(a.name.cmp(&b.name))
+    });
 
     Ok(GitContext {
         commits,
@@ -239,7 +240,11 @@ mod tests {
             ctx.contributors.iter().any(|c| c.name == "Test User"),
             "expected 'Test User' contributor"
         );
-        let contributor = ctx.contributors.iter().find(|c| c.name == "Test User").unwrap();
+        let contributor = ctx
+            .contributors
+            .iter()
+            .find(|c| c.name == "Test User")
+            .unwrap();
         assert_eq!(contributor.commit_count, 2);
 
         // file.txt was touched in both commits — highest churn

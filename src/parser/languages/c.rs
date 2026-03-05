@@ -1,4 +1,6 @@
-use crate::parser::language::{Export, Import, LanguageSupport, ParseResult, Symbol, SymbolKind, Visibility};
+use crate::parser::language::{
+    Export, Import, LanguageSupport, ParseResult, Symbol, SymbolKind, Visibility,
+};
 use tree_sitter::Language as TsLanguage;
 
 pub struct CLanguage;
@@ -147,7 +149,10 @@ impl LanguageSupport for CLanguage {
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
-                    exports.push(Export { name: name.clone(), kind: SymbolKind::Function });
+                    exports.push(Export {
+                        name: name.clone(),
+                        kind: SymbolKind::Function,
+                    });
                     symbols.push(Symbol {
                         name,
                         kind: SymbolKind::Function,
@@ -169,7 +174,10 @@ impl LanguageSupport for CLanguage {
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
-                    exports.push(Export { name: name.clone(), kind: SymbolKind::Struct });
+                    exports.push(Export {
+                        name: name.clone(),
+                        kind: SymbolKind::Struct,
+                    });
                     symbols.push(Symbol {
                         name,
                         kind: SymbolKind::Struct,
@@ -191,7 +199,10 @@ impl LanguageSupport for CLanguage {
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
-                    exports.push(Export { name: name.clone(), kind: SymbolKind::Enum });
+                    exports.push(Export {
+                        name: name.clone(),
+                        kind: SymbolKind::Enum,
+                    });
                     symbols.push(Symbol {
                         name,
                         kind: SymbolKind::Enum,
@@ -213,7 +224,10 @@ impl LanguageSupport for CLanguage {
                     let start_line = node.start_position().row + 1;
                     let end_line = node.end_position().row + 1;
 
-                    exports.push(Export { name: name.clone(), kind: SymbolKind::TypeAlias });
+                    exports.push(Export {
+                        name: name.clone(),
+                        kind: SymbolKind::TypeAlias,
+                    });
                     symbols.push(Symbol {
                         name,
                         kind: SymbolKind::TypeAlias,
@@ -236,7 +250,10 @@ impl LanguageSupport for CLanguage {
                                 let body = Self::node_text(&child, source_bytes).to_string();
                                 let start_line = child.start_position().row + 1;
                                 let end_line = child.end_position().row + 1;
-                                exports.push(Export { name: name.clone(), kind: SymbolKind::Struct });
+                                exports.push(Export {
+                                    name: name.clone(),
+                                    kind: SymbolKind::Struct,
+                                });
                                 symbols.push(Symbol {
                                     name,
                                     kind: SymbolKind::Struct,
@@ -255,7 +272,11 @@ impl LanguageSupport for CLanguage {
             }
         }
 
-        ParseResult { symbols, imports, exports }
+        ParseResult {
+            symbols,
+            imports,
+            exports,
+        }
     }
 }
 
@@ -288,7 +309,11 @@ mod tests {
         assert_eq!(sym.name, "add");
         assert_eq!(sym.kind, SymbolKind::Function);
         assert_eq!(sym.visibility, Visibility::Public);
-        assert!(sym.signature.contains("int add(int a, int b)"), "signature: {}", sym.signature);
+        assert!(
+            sym.signature.contains("int add(int a, int b)"),
+            "signature: {}",
+            sym.signature
+        );
 
         assert_eq!(result.exports.len(), 1);
         assert_eq!(result.exports[0].name, "add");
@@ -306,7 +331,10 @@ mod tests {
 
         assert_eq!(result.imports.len(), 2);
         assert!(result.imports.iter().any(|i| i.source.contains("stdio.h")));
-        assert!(result.imports.iter().any(|i| i.source.contains("myheader.h")));
+        assert!(result
+            .imports
+            .iter()
+            .any(|i| i.source.contains("myheader.h")));
     }
 
     #[test]
@@ -319,7 +347,11 @@ mod tests {
         let lang = CLanguage;
         let result = lang.extract(source, &tree);
 
-        let typedefs: Vec<_> = result.symbols.iter().filter(|s| s.kind == SymbolKind::TypeAlias).collect();
+        let typedefs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::TypeAlias)
+            .collect();
         assert!(!typedefs.is_empty(), "expected typedef symbol");
         assert_eq!(typedefs[0].name, "uint32_t");
     }
