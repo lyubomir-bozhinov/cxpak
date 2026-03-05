@@ -1,0 +1,11 @@
+pub const BUILTIN_IGNORES: &[&str] = &[
+    "node_modules", "__pycache__", ".venv", "venv", "vendor",
+    "target", "dist", "build", "out", ".next",
+    ".DS_Store", ".idea", ".vscode", "*.swp", "*.swo",
+    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock", "poetry.lock", "Gemfile.lock", "go.sum",
+    "*.png", "*.jpg", "*.jpeg", "*.gif", "*.ico", "*.svg",
+    "*.woff", "*.woff2", "*.ttf", "*.eot",
+    "*.mp3", "*.mp4", "*.zip", "*.tar.gz",
+    "*.jar", "*.war", "*.class", "*.o", "*.so", "*.dylib", "*.dll", "*.exe", "*.wasm", "*.pyc",
+    ".git", ".hg", ".svn", "*.min.js", "*.min.css", "*.map",
+];
