@@ -40,9 +40,21 @@ pub fn render(sections: &OutputSections) -> String {
     out
 }
 
+pub fn render_single_section(title: &str, content: &str) -> String {
+    format!("## {title}\n\n{content}\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_render_single_section() {
+        let content = "### src/main.rs\n- pub Function: `main`\n";
+        let output = render_single_section("Module / Component Map", content);
+        assert!(output.starts_with("## Module / Component Map"));
+        assert!(output.contains("pub Function"));
+    }
 
     #[test]
     fn test_render_includes_sections() {

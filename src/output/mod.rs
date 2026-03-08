@@ -15,6 +15,14 @@ pub struct OutputSections {
     pub git_context: String,
 }
 
+pub fn render_single_section(title: &str, content: &str, format: &OutputFormat) -> String {
+    match format {
+        OutputFormat::Markdown => markdown::render_single_section(title, content),
+        OutputFormat::Xml => xml::render_single_section(title, content),
+        OutputFormat::Json => json::render_single_section(title, content),
+    }
+}
+
 pub fn render(sections: &OutputSections, format: &OutputFormat) -> String {
     match format {
         OutputFormat::Markdown => markdown::render(sections),

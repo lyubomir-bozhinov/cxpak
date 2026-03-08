@@ -19,6 +19,13 @@ struct JsonOutput {
     git_context: String,
 }
 
+pub fn render_single_section(title: &str, content: &str) -> String {
+    let key = title.to_lowercase().replace([' ', '/'], "_");
+    let mut map = serde_json::Map::new();
+    map.insert(key, serde_json::Value::String(content.to_string()));
+    serde_json::to_string_pretty(&map).unwrap_or_else(|_| "{}".into())
+}
+
 pub fn render(sections: &OutputSections) -> String {
     let output = JsonOutput {
         metadata: sections.metadata.clone(),

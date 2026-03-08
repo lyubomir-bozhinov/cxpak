@@ -13,6 +13,14 @@ pub fn render(sections: &OutputSections) -> String {
     out
 }
 
+pub fn render_single_section(title: &str, content: &str) -> String {
+    let tag = title.to_lowercase().replace([' ', '/'], "-");
+    let mut out = String::from("<cxpak>\n");
+    emit_section(&mut out, &tag, content);
+    out.push_str("</cxpak>\n");
+    out
+}
+
 fn emit_section(out: &mut String, tag: &str, content: &str) {
     if !content.is_empty() {
         out.push_str(&format!("  <{tag}>\n"));
