@@ -3,8 +3,7 @@ use predicates::prelude::*;
 
 #[test]
 fn test_help_output() {
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .arg("--help")
         .assert()
         .success()
@@ -14,8 +13,7 @@ fn test_help_output() {
 
 #[test]
 fn test_version_output() {
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .arg("--version")
         .assert()
         .success()
@@ -24,8 +22,7 @@ fn test_version_output() {
 
 #[test]
 fn test_overview_requires_tokens() {
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args(["overview"])
         .assert()
         .failure()
@@ -34,8 +31,7 @@ fn test_overview_requires_tokens() {
 
 #[test]
 fn test_trace_requires_tokens_and_target() {
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args(["trace"])
         .assert()
         .failure();
@@ -43,8 +39,8 @@ fn test_trace_requires_tokens_and_target() {
 
 #[test]
 fn test_tokens_parses_k_suffix() {
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args(["overview", "--tokens", "50k"])
-        .assert();
+        .assert()
+        .success();
 }

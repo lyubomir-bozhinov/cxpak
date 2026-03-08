@@ -62,7 +62,11 @@ fn make_large_temp_repo() -> TempDir {
         "[package]\nname = \"large\"\nversion = \"0.1.0\"\n",
     )
     .unwrap();
-    std::fs::write(dir.path().join("README.md"), "# Large Test Project\nThis is a readme with some content for testing.\n").unwrap();
+    std::fs::write(
+        dir.path().join("README.md"),
+        "# Large Test Project\nThis is a readme with some content for testing.\n",
+    )
+    .unwrap();
 
     let mut index = repo.index().unwrap();
     index
@@ -84,8 +88,7 @@ fn test_pack_mode_creates_cxpak_dir() {
     let out_dir = TempDir::new().unwrap();
     let out_file = out_dir.path().join("overview.md");
 
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args([
             "overview",
             "--tokens",
@@ -104,15 +107,17 @@ fn test_pack_mode_creates_cxpak_dir() {
     let has_detail_files = cxpak_dir.join("modules.md").exists()
         || cxpak_dir.join("signatures.md").exists()
         || cxpak_dir.join("tree.md").exists();
-    assert!(has_detail_files, "at least one detail file should exist in .cxpak/");
+    assert!(
+        has_detail_files,
+        "at least one detail file should exist in .cxpak/"
+    );
 }
 
 #[test]
 fn test_pack_mode_overview_has_pointers() {
     let repo = make_large_temp_repo();
 
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args(["overview", "--tokens", "500"])
         .arg(repo.path())
         .assert()
@@ -124,8 +129,7 @@ fn test_pack_mode_overview_has_pointers() {
 fn test_pack_mode_gitignore_updated() {
     let repo = make_large_temp_repo();
 
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args(["overview", "--tokens", "500"])
         .arg(repo.path())
         .assert()
@@ -139,22 +143,23 @@ fn test_pack_mode_gitignore_updated() {
 fn test_single_file_mode_no_cxpak_dir() {
     let repo = make_temp_repo();
 
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args(["overview", "--tokens", "50k"])
         .arg(repo.path())
         .assert()
         .success();
 
     let cxpak_dir = repo.path().join(".cxpak");
-    assert!(!cxpak_dir.exists(), ".cxpak/ should NOT exist when repo fits in budget");
+    assert!(
+        !cxpak_dir.exists(),
+        ".cxpak/ should NOT exist when repo fits in budget"
+    );
 }
 
 #[test]
 fn test_overview_markdown_output() {
     let repo = make_temp_repo();
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args(["overview", "--tokens", "50k"])
         .arg(repo.path())
         .assert()
@@ -166,8 +171,7 @@ fn test_overview_markdown_output() {
 #[test]
 fn test_overview_json_output() {
     let repo = make_temp_repo();
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args(["overview", "--tokens", "50k", "--format", "json"])
         .arg(repo.path())
         .assert()
@@ -178,8 +182,7 @@ fn test_overview_json_output() {
 #[test]
 fn test_overview_xml_output() {
     let repo = make_temp_repo();
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args(["overview", "--tokens", "50k", "--format", "xml"])
         .arg(repo.path())
         .assert()
@@ -193,8 +196,7 @@ fn test_overview_out_flag() {
     let out_dir = TempDir::new().unwrap();
     let out_file = out_dir.path().join("output.md");
 
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args([
             "overview",
             "--tokens",
@@ -213,8 +215,7 @@ fn test_overview_out_flag() {
 #[test]
 fn test_overview_small_budget_shows_omission_markers() {
     let repo = make_temp_repo();
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args(["overview", "--tokens", "500"])
         .arg(repo.path())
         .assert()
@@ -226,8 +227,7 @@ fn test_overview_small_budget_shows_omission_markers() {
 fn test_overview_not_git_repo() {
     let dir = TempDir::new().unwrap();
 
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args(["overview", "--tokens", "50k"])
         .arg(dir.path())
         .assert()
@@ -237,8 +237,7 @@ fn test_overview_not_git_repo() {
 
 #[test]
 fn test_trace_not_yet_implemented() {
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args(["trace", "--tokens", "50k", "main"])
         .assert()
         .failure()
@@ -248,8 +247,7 @@ fn test_trace_not_yet_implemented() {
 #[test]
 fn test_overview_verbose_output() {
     let repo = make_temp_repo();
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args(["overview", "--tokens", "50k", "--verbose"])
         .arg(repo.path())
         .assert()
@@ -262,8 +260,7 @@ fn test_overview_verbose_output() {
 #[test]
 fn test_overview_contains_rust_symbols() {
     let repo = make_temp_repo();
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args(["overview", "--tokens", "50k"])
         .arg(repo.path())
         .assert()
@@ -275,8 +272,7 @@ fn test_overview_contains_rust_symbols() {
 fn test_pack_mode_metadata_has_budget_and_detail_info() {
     let repo = make_large_temp_repo();
 
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args(["overview", "--tokens", "500"])
         .arg(repo.path())
         .assert()
@@ -289,8 +285,7 @@ fn test_pack_mode_metadata_has_budget_and_detail_info() {
 fn test_single_file_mode_no_detail_info() {
     let repo = make_temp_repo();
 
-    Command::cargo_bin("cxpak")
-        .unwrap()
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args(["overview", "--tokens", "50k"])
         .arg(repo.path())
         .assert()

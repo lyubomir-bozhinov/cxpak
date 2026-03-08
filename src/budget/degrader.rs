@@ -28,7 +28,13 @@ pub fn truncate_to_budget_with_pointer(
     section_name: &str,
     detail_filename: &str,
 ) -> (String, usize, usize) {
-    truncate_to_budget_inner(content, budget, counter, section_name, Some(detail_filename))
+    truncate_to_budget_inner(
+        content,
+        budget,
+        counter,
+        section_name,
+        Some(detail_filename),
+    )
 }
 
 fn truncate_to_budget_inner(
