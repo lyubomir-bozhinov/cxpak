@@ -1,7 +1,10 @@
 fn main() {
-    // libgit2 vendored builds on Windows need these system libraries
+    // Vendored libgit2 on Windows needs these system libraries linked explicitly
     if std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() == "windows" {
-        println!("cargo:rustc-link-lib=advapi32");
-        println!("cargo:rustc-link-lib=crypt32");
+        for lib in [
+            "advapi32", "crypt32", "ole32", "secur32", "ws2_32", "user32",
+        ] {
+            println!("cargo:rustc-link-lib={lib}");
+        }
     }
 }
