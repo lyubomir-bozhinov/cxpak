@@ -11,6 +11,12 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 
+struct SectionContent {
+    budgeted: String,
+    full: String,
+    was_truncated: bool,
+}
+
 pub fn run(
     path: &Path,
     token_budget: usize,
@@ -79,24 +85,27 @@ pub fn run(
     }
 
     // 4. Budget + render sections
+    let pack_mode = index.total_tokens > token_budget;
+
     let alloc = BudgetAllocation::allocate(token_budget);
 
     let metadata = render_metadata(&index);
-    let directory_tree = render_directory_tree(&index, alloc.directory_tree, &counter);
-    let module_map = render_module_map(&index, alloc.module_map, &counter);
-    let dependency_graph = render_dependency_graph(&index, alloc.dependency_graph, &counter);
-    let key_files = render_key_files(&index, alloc.key_files, &counter);
-    let signatures = render_signatures(&index, alloc.signatures, &counter);
-    let git_context = render_git_context(path, alloc.git_context, &counter);
+    let directory_tree = render_directory_tree(&index, alloc.directory_tree, &counter, pack_mode);
+    let module_map = render_module_map(&index, alloc.module_map, &counter, pack_mode);
+    let dependency_graph =
+        render_dependency_graph(&index, alloc.dependency_graph, &counter, pack_mode);
+    let key_files = render_key_files(&index, alloc.key_files, &counter, pack_mode);
+    let signatures = render_signatures(&index, alloc.signatures, &counter, pack_mode);
+    let git_context = render_git_context(path, alloc.git_context, &counter, pack_mode);
 
     let sections = OutputSections {
         metadata,
-        directory_tree,
-        module_map,
-        dependency_graph,
-        key_files,
-        signatures,
-        git_context,
+        directory_tree: directory_tree.budgeted.clone(),
+        module_map: module_map.budgeted.clone(),
+        dependency_graph: dependency_graph.budgeted.clone(),
+        key_files: key_files.budgeted.clone(),
+        signatures: signatures.budgeted.clone(),
+        git_context: git_context.budgeted.clone(),
     };
 
     // 5. Render to format
@@ -153,110 +162,205 @@ fn render_metadata(index: &CodebaseIndex) -> String {
     out
 }
 
-fn render_directory_tree(index: &CodebaseIndex, budget: usize, counter: &TokenCounter) -> String {
-    let mut tree = String::new();
+fn render_directory_tree(
+    index: &CodebaseIndex,
+    budget: usize,
+    counter: &TokenCounter,
+    pack_mode: bool,
+) -> SectionContent {
+    let mut full = String::new();
     for file in &index.files {
-        tree.push_str(&file.relative_path);
-        tree.push('\n');
+        full.push_str(&file.relative_path);
+        full.push('\n');
     }
 
-    let (result, _, _) = degrader::truncate_to_budget(&tree, budget, counter, "directory tree");
-    result
+    let (budgeted, _, omitted) = if pack_mode {
+        degrader::truncate_to_budget_with_pointer(&full, budget, counter, "directory tree", "tree.md")
+    } else {
+        degrader::truncate_to_budget(&full, budget, counter, "directory tree")
+    };
+
+    SectionContent {
+        was_truncated: omitted > 0,
+        budgeted,
+        full,
+    }
 }
 
-fn render_module_map(index: &CodebaseIndex, budget: usize, counter: &TokenCounter) -> String {
-    let mut out = String::new();
+fn render_module_map(
+    index: &CodebaseIndex,
+    budget: usize,
+    counter: &TokenCounter,
+    pack_mode: bool,
+) -> SectionContent {
+    let mut full = String::new();
 
     for file in &index.files {
         if let Some(pr) = &file.parse_result {
             if pr.symbols.is_empty() {
                 continue;
             }
-            out.push_str(&format!("### {}\n", file.relative_path));
+            full.push_str(&format!("### {}\n", file.relative_path));
             for sym in &pr.symbols {
                 let vis = match sym.visibility {
                     crate::parser::language::Visibility::Public => "pub ",
                     crate::parser::language::Visibility::Private => "",
                 };
-                out.push_str(&format!("- {}{:?}: `{}`\n", vis, sym.kind, sym.name));
+                full.push_str(&format!("- {}{:?}: `{}`\n", vis, sym.kind, sym.name));
             }
-            out.push('\n');
+            full.push('\n');
         }
     }
 
-    let (result, _, _) = degrader::truncate_to_budget(&out, budget, counter, "module map");
-    result
+    let (budgeted, _, omitted) = if pack_mode {
+        degrader::truncate_to_budget_with_pointer(&full, budget, counter, "module map", "modules.md")
+    } else {
+        degrader::truncate_to_budget(&full, budget, counter, "module map")
+    };
+
+    SectionContent {
+        was_truncated: omitted > 0,
+        budgeted,
+        full,
+    }
 }
 
-fn render_dependency_graph(index: &CodebaseIndex, budget: usize, counter: &TokenCounter) -> String {
-    let mut out = String::new();
+fn render_dependency_graph(
+    index: &CodebaseIndex,
+    budget: usize,
+    counter: &TokenCounter,
+    pack_mode: bool,
+) -> SectionContent {
+    let mut full = String::new();
 
     for file in &index.files {
         if let Some(pr) = &file.parse_result {
             if pr.imports.is_empty() {
                 continue;
             }
-            out.push_str(&format!("**{}** imports:\n", file.relative_path));
+            full.push_str(&format!("**{}** imports:\n", file.relative_path));
             for imp in &pr.imports {
                 if imp.names.is_empty() {
-                    out.push_str(&format!("- `{}`\n", imp.source));
+                    full.push_str(&format!("- `{}`\n", imp.source));
                 } else {
-                    out.push_str(&format!("- `{}` — {}\n", imp.source, imp.names.join(", ")));
+                    full.push_str(&format!(
+                        "- `{}` — {}\n",
+                        imp.source,
+                        imp.names.join(", ")
+                    ));
                 }
             }
-            out.push('\n');
+            full.push('\n');
         }
     }
 
-    let (result, _, _) = degrader::truncate_to_budget(&out, budget, counter, "dependency graph");
-    result
+    let (budgeted, _, omitted) = if pack_mode {
+        degrader::truncate_to_budget_with_pointer(
+            &full,
+            budget,
+            counter,
+            "dependency graph",
+            "dependencies.md",
+        )
+    } else {
+        degrader::truncate_to_budget(&full, budget, counter, "dependency graph")
+    };
+
+    SectionContent {
+        was_truncated: omitted > 0,
+        budgeted,
+        full,
+    }
 }
 
-fn render_key_files(index: &CodebaseIndex, budget: usize, counter: &TokenCounter) -> String {
-    let mut out = String::new();
-    let mut remaining = budget;
-
+fn render_key_files(
+    index: &CodebaseIndex,
+    budget: usize,
+    counter: &TokenCounter,
+    pack_mode: bool,
+) -> SectionContent {
     let key_files: Vec<_> = index
         .files
         .iter()
         .filter(|f| CodebaseIndex::is_key_file(&f.relative_path))
         .collect();
 
-    for file in key_files {
+    // Generate full (unbudgeted) content
+    let mut full = String::new();
+    for file in &key_files {
+        full.push_str(&format!("### {}\n\n```\n", file.relative_path));
+        full.push_str(&file.content);
+        full.push_str("\n```\n\n");
+    }
+
+    // Generate budgeted content (existing logic, but with pointer markers in pack mode)
+    let mut budgeted_out = String::new();
+    let mut remaining = budget;
+
+    for file in &key_files {
         let header = format!("### {}\n\n```\n", file.relative_path);
         let footer = "\n```\n\n";
         let header_tokens = counter.count(&header) + counter.count(footer);
 
         if remaining <= header_tokens {
-            out.push_str(&degrader::omission_marker(
-                &format!("key file: {}", file.relative_path),
-                file.token_count,
-                budget + file.token_count,
-            ));
-            out.push('\n');
+            if pack_mode {
+                budgeted_out.push_str(&degrader::omission_pointer(
+                    &format!("key file: {}", file.relative_path),
+                    "key-files.md",
+                    file.token_count,
+                ));
+            } else {
+                budgeted_out.push_str(&degrader::omission_marker(
+                    &format!("key file: {}", file.relative_path),
+                    file.token_count,
+                    budget + file.token_count,
+                ));
+            }
+            budgeted_out.push('\n');
             continue;
         }
 
         let content_budget = remaining - header_tokens;
-        let (content, used, _omitted) = degrader::truncate_to_budget(
-            &file.content,
-            content_budget,
-            counter,
-            &format!("key file: {}", file.relative_path),
-        );
+        let (content, used, _omitted) = if pack_mode {
+            degrader::truncate_to_budget_with_pointer(
+                &file.content,
+                content_budget,
+                counter,
+                &format!("key file: {}", file.relative_path),
+                "key-files.md",
+            )
+        } else {
+            degrader::truncate_to_budget(
+                &file.content,
+                content_budget,
+                counter,
+                &format!("key file: {}", file.relative_path),
+            )
+        };
 
-        out.push_str(&header);
-        out.push_str(&content);
-        out.push_str(footer);
+        budgeted_out.push_str(&header);
+        budgeted_out.push_str(&content);
+        budgeted_out.push_str(footer);
 
         remaining = remaining.saturating_sub(used + header_tokens);
     }
 
-    out
+    let was_truncated = counter.count(&budgeted_out) < counter.count(&full);
+
+    SectionContent {
+        budgeted: budgeted_out,
+        full,
+        was_truncated,
+    }
 }
 
-fn render_signatures(index: &CodebaseIndex, budget: usize, counter: &TokenCounter) -> String {
-    let mut out = String::new();
+fn render_signatures(
+    index: &CodebaseIndex,
+    budget: usize,
+    counter: &TokenCounter,
+    pack_mode: bool,
+) -> SectionContent {
+    let mut full = String::new();
 
     for file in &index.files {
         if let Some(pr) = &file.parse_result {
@@ -270,49 +374,84 @@ fn render_signatures(index: &CodebaseIndex, budget: usize, counter: &TokenCounte
                 continue;
             }
 
-            out.push_str(&format!("### {}\n\n", file.relative_path));
+            full.push_str(&format!("### {}\n\n", file.relative_path));
             for sym in public_syms {
-                out.push_str(&format!("```\n{}\n```\n\n", sym.signature));
+                full.push_str(&format!("```\n{}\n```\n\n", sym.signature));
             }
         }
     }
 
-    let (result, _, _) = degrader::truncate_to_budget(&out, budget, counter, "signatures");
-    result
-}
-
-fn render_git_context(path: &Path, budget: usize, counter: &TokenCounter) -> String {
-    let ctx = match git::extract_git_context(path, 20) {
-        Ok(ctx) => ctx,
-        Err(_) => return String::new(),
+    let (budgeted, _, omitted) = if pack_mode {
+        degrader::truncate_to_budget_with_pointer(
+            &full,
+            budget,
+            counter,
+            "signatures",
+            "signatures.md",
+        )
+    } else {
+        degrader::truncate_to_budget(&full, budget, counter, "signatures")
     };
 
-    let mut out = String::new();
+    SectionContent {
+        was_truncated: omitted > 0,
+        budgeted,
+        full,
+    }
+}
 
-    out.push_str("### Recent Commits\n\n");
+fn render_git_context(
+    path: &Path,
+    budget: usize,
+    counter: &TokenCounter,
+    pack_mode: bool,
+) -> SectionContent {
+    let ctx = match git::extract_git_context(path, 20) {
+        Ok(ctx) => ctx,
+        Err(_) => {
+            return SectionContent {
+                budgeted: String::new(),
+                full: String::new(),
+                was_truncated: false,
+            }
+        }
+    };
+
+    let mut full = String::new();
+
+    full.push_str("### Recent Commits\n\n");
     for commit in &ctx.commits {
-        out.push_str(&format!(
+        full.push_str(&format!(
             "- `{}` {} — {} ({})\n",
             commit.hash, commit.message, commit.author, commit.date
         ));
     }
 
-    out.push_str("\n### Most Changed Files\n\n");
+    full.push_str("\n### Most Changed Files\n\n");
     for file in &ctx.file_churn {
-        out.push_str(&format!(
+        full.push_str(&format!(
             "- `{}` — {} commits\n",
             file.path, file.commit_count
         ));
     }
 
-    out.push_str("\n### Contributors\n\n");
+    full.push_str("\n### Contributors\n\n");
     for contrib in &ctx.contributors {
-        out.push_str(&format!(
+        full.push_str(&format!(
             "- {} — {} commits\n",
             contrib.name, contrib.commit_count
         ));
     }
 
-    let (result, _, _) = degrader::truncate_to_budget(&out, budget, counter, "git context");
-    result
+    let (budgeted, _, omitted) = if pack_mode {
+        degrader::truncate_to_budget_with_pointer(&full, budget, counter, "git context", "git.md")
+    } else {
+        degrader::truncate_to_budget(&full, budget, counter, "git context")
+    };
+
+    SectionContent {
+        was_truncated: omitted > 0,
+        budgeted,
+        full,
+    }
 }
