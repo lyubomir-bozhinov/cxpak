@@ -7,6 +7,7 @@ pub mod index;
 pub mod output;
 pub mod parser;
 pub mod scanner;
+pub mod util;
 
 use clap::Parser;
 use cli::{parse_token_count, Cli, Commands};
