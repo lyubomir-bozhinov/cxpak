@@ -359,6 +359,32 @@ fn test_pack_mode_xml_detail_file_extension() {
 }
 
 #[test]
+fn test_pack_mode_xml_pointers_not_escaped() {
+    let repo = make_large_temp_repo();
+    let output = Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args(["overview", "--tokens", "500", "--format", "xml"])
+        .arg(repo.path())
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Pointers should be readable, not escaped as &lt;!-- ... --&gt;
+    assert!(
+        !stdout.contains("&lt;!--"),
+        "XML output should not escape pointer comments"
+    );
+    // Should contain actual pointer reference via <detail-ref>
+    assert!(
+        stdout.contains("<detail-ref>"),
+        "XML output should contain <detail-ref> elements for pointers"
+    );
+    assert!(
+        stdout.contains(".cxpak/"),
+        "XML output should contain .cxpak/ pointer reference"
+    );
+}
+
+#[test]
 fn test_stale_cxpak_cleaned_on_pack_mode() {
     let repo = make_large_temp_repo();
 

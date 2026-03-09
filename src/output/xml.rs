@@ -25,7 +25,17 @@ fn emit_section(out: &mut String, tag: &str, content: &str) {
     if !content.is_empty() {
         out.push_str(&format!("  <{tag}>\n"));
         for line in content.lines() {
-            out.push_str(&format!("    {}\n", escape_xml(line)));
+            let trimmed = line.trim();
+            if trimmed.starts_with("<!-- ") && trimmed.ends_with(" -->") {
+                // Omission pointer — emit as XML element instead of escaped comment
+                let inner = &trimmed[5..trimmed.len() - 4];
+                out.push_str(&format!(
+                    "    <detail-ref>{}</detail-ref>\n",
+                    escape_xml(inner)
+                ));
+            } else {
+                out.push_str(&format!("    {}\n", escape_xml(line)));
+            }
         }
         out.push_str(&format!("  </{tag}>\n"));
     }
