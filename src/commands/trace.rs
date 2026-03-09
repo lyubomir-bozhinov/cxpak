@@ -11,6 +11,7 @@ use std::io::Write;
 use std::path::Path;
 
 pub fn run(
+    path: &Path,
     target: &str,
     token_budget: usize,
     format: &OutputFormat,
@@ -19,10 +20,6 @@ pub fn run(
     all: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let counter = TokenCounter::new();
-
-    // The CLI does not (yet) expose a path argument for trace, so we operate on
-    // the current working directory.  Task 2 will wire up a proper --path flag.
-    let path = Path::new(".");
 
     // 1. Scan
     if verbose {
