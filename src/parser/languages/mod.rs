@@ -21,3 +21,15 @@ pub mod c;
 
 #[cfg(feature = "lang-cpp")]
 pub mod cpp;
+
+#[cfg(feature = "lang-ruby")]
+pub mod ruby;
+
+#[cfg(feature = "lang-csharp")]
+pub mod csharp;
+
+#[cfg(feature = "lang-swift")]
+pub mod swift;
+
+#[cfg(feature = "lang-kotlin")]
+pub mod kotlin;

@@ -152,6 +152,10 @@ fn detect_language(path: &Path) -> Option<String> {
         "go" => "go",
         "c" | "h" => "c",
         "cpp" | "hpp" | "cc" | "hh" | "cxx" => "cpp",
+        "rb" => "ruby",
+        "cs" => "csharp",
+        "swift" => "swift",
+        "kt" | "kts" => "kotlin",
         _ => return None,
     };
     Some(lang.to_string())

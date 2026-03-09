@@ -25,6 +25,10 @@ ignore = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 quick-xml = { version = "0.36", features = ["serialize"] }
+tree-sitter-ruby = { version = "0.23", optional = true }
+tree-sitter-c-sharp = { version = "0.23", optional = true }
+tree-sitter-swift = { version = "0.7", optional = true }
+tree-sitter-kotlin-ng = { version = "1.1.0", optional = true }
 
 [dev-dependencies]
 assert_cmd = "2"
@@ -32,7 +36,7 @@ predicates = "3"
 tempfile = "3"
 
 [features]
-default = ["lang-rust", "lang-typescript", "lang-javascript", "lang-java", "lang-python", "lang-go", "lang-c", "lang-cpp"]
+default = ["lang-rust", "lang-typescript", "lang-javascript", "lang-java", "lang-python", "lang-go", "lang-c", "lang-cpp", "lang-ruby", "lang-csharp", "lang-swift", "lang-kotlin"]
 lang-rust = ["dep:tree-sitter-rust"]
 lang-typescript = ["dep:tree-sitter-typescript"]
 lang-javascript = ["dep:tree-sitter-javascript"]
@@ -41,3 +45,7 @@ lang-python = ["dep:tree-sitter-python"]
 lang-go = ["dep:tree-sitter-go"]
 lang-c = ["dep:tree-sitter-c"]
 lang-cpp = ["dep:tree-sitter-cpp"]
+lang-ruby = ["dep:tree-sitter-ruby"]
+lang-csharp = ["dep:tree-sitter-c-sharp"]
+lang-swift = ["dep:tree-sitter-swift"]
+lang-kotlin = ["dep:tree-sitter-kotlin-ng"]

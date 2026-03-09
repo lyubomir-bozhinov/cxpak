@@ -47,6 +47,18 @@ impl LanguageRegistry {
 
         #[cfg(feature = "lang-cpp")]
         self.register(Box::new(languages::cpp::CppLanguage));
+
+        #[cfg(feature = "lang-ruby")]
+        self.register(Box::new(languages::ruby::RubyLanguage));
+
+        #[cfg(feature = "lang-csharp")]
+        self.register(Box::new(languages::csharp::CSharpLanguage));
+
+        #[cfg(feature = "lang-swift")]
+        self.register(Box::new(languages::swift::SwiftLanguage));
+
+        #[cfg(feature = "lang-kotlin")]
+        self.register(Box::new(languages::kotlin::KotlinLanguage));
     }
 
     pub fn register(&mut self, lang: Box<dyn LanguageSupport>) {
