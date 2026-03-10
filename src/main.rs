@@ -2,6 +2,7 @@ mod cli;
 mod commands;
 
 pub mod budget;
+pub mod cache;
 pub mod git;
 pub mod index;
 pub mod output;

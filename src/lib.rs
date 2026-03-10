@@ -1,4 +1,5 @@
 pub mod budget;
+pub mod cache;
 pub mod cli;
 pub mod git;
 pub mod index;

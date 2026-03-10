@@ -1,6 +1,7 @@
+use serde::{Deserialize, Serialize};
 use tree_sitter::Language as TsLanguage;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Symbol {
     pub name: String,
     pub kind: SymbolKind,
@@ -11,7 +12,7 @@ pub struct Symbol {
     pub end_line: usize,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SymbolKind {
     Function,
     Struct,
@@ -24,25 +25,25 @@ pub enum SymbolKind {
     TypeAlias,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Visibility {
     Public,
     Private,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Import {
     pub source: String,
     pub names: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Export {
     pub name: String,
     pub kind: SymbolKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParseResult {
     pub symbols: Vec<Symbol>,
     pub imports: Vec<Import>,
