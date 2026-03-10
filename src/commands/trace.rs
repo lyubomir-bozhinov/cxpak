@@ -179,7 +179,7 @@ pub fn run(
 /// indexed file paths.  We do a best-effort match: convert the module path
 /// (e.g. `crate::scanner`) to a file path (e.g. `src/scanner/mod.rs` or
 /// `src/scanner.rs`) and look up whether such a file exists.
-fn build_dependency_graph(index: &CodebaseIndex) -> DependencyGraph {
+pub fn build_dependency_graph(index: &CodebaseIndex) -> DependencyGraph {
     let all_paths: HashSet<&str> = index
         .files
         .iter()

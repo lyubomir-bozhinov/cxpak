@@ -1,9 +1,14 @@
-use std::collections::HashMap;
+use crate::budget::counter::TokenCounter;
+use crate::budget::degrader;
+use crate::cli::OutputFormat;
+use crate::index::CodebaseIndex;
+use crate::output::{self, OutputSections};
+use crate::scanner::Scanner;
+use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use std::path::Path;
 
 /// A single file's changes from a git diff.
-// Task 8 will wire this into the CLI pipeline; suppress dead-code until then.
-#[allow(dead_code)]
 pub struct FileChange {
     /// Relative path of the changed file.
     pub path: String,
@@ -14,8 +19,6 @@ pub struct FileChange {
 /// Extract changed files and their diffs.
 /// If `git_ref` is None, diffs working tree against HEAD.
 /// If `git_ref` is Some, diffs that ref's tree against HEAD's tree.
-// Task 8 will call this from the CLI pipeline; suppress dead-code until then.
-#[allow(dead_code)]
 pub fn extract_changes(
     repo_path: &Path,
     git_ref: Option<&str>,
@@ -80,6 +83,183 @@ pub fn extract_changes(
     changes.sort_by(|a, b| a.path.cmp(&b.path));
 
     Ok(changes)
+}
+
+pub fn run(
+    path: &Path,
+    git_ref: Option<&str>,
+    token_budget: usize,
+    format: &OutputFormat,
+    out: Option<&Path>,
+    verbose: bool,
+    all: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // 1. Extract git changes
+    if verbose {
+        eprintln!("cxpak: extracting git changes in {}", path.display());
+    }
+    let changes = extract_changes(path, git_ref)?;
+
+    if changes.is_empty() {
+        let stdout = std::io::stdout();
+        let mut handle = stdout.lock();
+        handle.write_all(b"No changes detected.\n")?;
+        return Ok(());
+    }
+
+    if verbose {
+        eprintln!("cxpak: {} changed file(s)", changes.len());
+    }
+
+    // 2. Scan repo
+    if verbose {
+        eprintln!("cxpak: scanning {}", path.display());
+    }
+    let scanner = Scanner::new(path)?;
+    let files = scanner.scan()?;
+    if verbose {
+        eprintln!("cxpak: found {} files", files.len());
+    }
+
+    let counter = TokenCounter::new();
+
+    // 3. Parse with cache
+    let parse_results = crate::cache::parse::parse_with_cache(&files, path, &counter, verbose);
+
+    // 4. Build index
+    let index = CodebaseIndex::build(files, parse_results, &counter);
+    if verbose {
+        eprintln!(
+            "cxpak: indexed {} files, ~{} tokens total",
+            index.total_files, index.total_tokens
+        );
+    }
+
+    // 5. Build dependency graph
+    let graph = crate::commands::trace::build_dependency_graph(&index);
+
+    // 6. Determine the set of changed file paths (relative)
+    let changed_paths: HashSet<String> = changes.iter().map(|c| c.path.clone()).collect();
+
+    // 7. Walk graph from changed files: 1-hop or full BFS
+    let relevant_paths: HashSet<String> = if all {
+        let start: Vec<&str> = changed_paths.iter().map(String::as_str).collect();
+        graph.reachable_from(&start)
+    } else {
+        let mut one_hop: HashSet<String> = changed_paths.clone();
+        for file in &changed_paths {
+            if let Some(deps) = graph.dependencies(file) {
+                one_hop.extend(deps.iter().cloned());
+            }
+            for dep in graph.dependents(file) {
+                one_hop.insert(dep.to_string());
+            }
+        }
+        one_hop
+    };
+
+    // Context files: reachable but not themselves changed
+    let context_paths: HashSet<String> =
+        relevant_paths.difference(&changed_paths).cloned().collect();
+
+    if verbose {
+        eprintln!(
+            "cxpak: {} context file(s) in dependency subgraph",
+            context_paths.len()
+        );
+    }
+
+    // 8. Build diff section text
+    let mut full_diff = String::new();
+    for change in &changes {
+        full_diff.push_str(&format!(
+            "### {}\n\n```diff\n{}\n```\n\n",
+            change.path, change.diff_text
+        ));
+    }
+
+    // 9. Budget: diff first, then context signatures with the remainder
+    let (diff_content, diff_used, _) =
+        degrader::truncate_to_budget(&full_diff, token_budget, &counter, "diff");
+
+    let context_budget = token_budget.saturating_sub(diff_used);
+    let signatures = render_context_signatures(&index, &context_paths, context_budget, &counter);
+
+    // 10. Metadata
+    let git_ref_display = git_ref.unwrap_or("working tree");
+    let metadata = format!(
+        "- **Ref:** `{}`\n- **Changed files:** {}\n- **Context files:** {}\n",
+        git_ref_display,
+        changed_paths.len(),
+        context_paths.len()
+    );
+
+    // 11. Assemble and render
+    let sections = OutputSections {
+        metadata,
+        directory_tree: String::new(),
+        module_map: String::new(),
+        dependency_graph: String::new(),
+        key_files: diff_content,
+        signatures,
+        git_context: String::new(),
+    };
+
+    let rendered = output::render(&sections, format);
+
+    match out {
+        Some(out_path) => {
+            std::fs::write(out_path, &rendered)?;
+            if verbose {
+                eprintln!("cxpak: written to {}", out_path.display());
+            }
+        }
+        None => {
+            let stdout = std::io::stdout();
+            let mut handle = stdout.lock();
+            handle.write_all(rendered.as_bytes())?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Render public signatures of context files (reachable but not changed).
+fn render_context_signatures(
+    index: &CodebaseIndex,
+    context_paths: &HashSet<String>,
+    budget: usize,
+    counter: &TokenCounter,
+) -> String {
+    let mut full = String::new();
+
+    for file in &index.files {
+        if !context_paths.contains(&file.relative_path) {
+            continue;
+        }
+        let Some(pr) = &file.parse_result else {
+            continue;
+        };
+
+        let public_syms: Vec<_> = pr
+            .symbols
+            .iter()
+            .filter(|s| s.visibility == crate::parser::language::Visibility::Public)
+            .collect();
+
+        if public_syms.is_empty() {
+            continue;
+        }
+
+        full.push_str(&format!("### {}\n\n", file.relative_path));
+        for sym in public_syms {
+            full.push_str(&format!("```\n{}\n```\n\n", sym.signature));
+        }
+    }
+
+    let (budgeted, _, _) =
+        degrader::truncate_to_budget(&full, budget, counter, "context signatures");
+    budgeted
 }
 
 #[cfg(test)]

@@ -18,6 +18,36 @@ fn main() {
 
     let result = match &cli.command {
         Commands::Clean { path } => commands::clean::run(path),
+        Commands::Diff {
+            tokens,
+            out,
+            format,
+            verbose,
+            all,
+            git_ref,
+            path,
+        } => {
+            let token_budget = match parse_token_count(tokens) {
+                Ok(0) => {
+                    eprintln!("Error: --tokens must be greater than 0");
+                    std::process::exit(1);
+                }
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            };
+            commands::diff::run(
+                path,
+                git_ref.as_deref(),
+                token_budget,
+                format,
+                out.as_deref(),
+                *verbose,
+                *all,
+            )
+        }
         Commands::Overview {
             tokens,
             out,

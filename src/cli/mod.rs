@@ -32,6 +32,24 @@ pub enum Commands {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// Show token-budgeted change summary with dependency context
+    Diff {
+        #[arg(long)]
+        tokens: String,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long, default_value = "markdown")]
+        format: OutputFormat,
+        #[arg(long)]
+        verbose: bool,
+        #[arg(long)]
+        all: bool,
+        /// Git ref to diff against (default: HEAD for working tree changes)
+        #[arg(long)]
+        git_ref: Option<String>,
+        #[arg(default_value = ".")]
+        path: PathBuf,
+    },
     /// Trace from error/function, pack relevant code paths
     Trace {
         #[arg(long)]
