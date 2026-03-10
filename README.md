@@ -7,6 +7,11 @@ A Rust CLI that indexes codebases using tree-sitter and produces token-budgeted 
 ## Installation
 
 ```bash
+# Via Homebrew (macOS/Linux)
+brew tap lyubomir-bozhinov/tap
+brew install cxpak
+
+# Via cargo
 cargo install cxpak
 ```
 
@@ -28,6 +33,18 @@ cxpak trace --tokens 50k --all "MyError" /path/to/repo
 # Different output formats
 cxpak overview --tokens 50k --format json .
 cxpak overview --tokens 50k --format xml .
+
+# Show changes with dependency context (vs working tree)
+cxpak diff --tokens 50k .
+
+# Diff against a specific ref
+cxpak diff --tokens 50k --git-ref main .
+
+# Full dependency graph context
+cxpak diff --tokens 50k --all .
+
+# Clean cache and output files
+cxpak clean .
 ```
 
 ## What You Get
@@ -68,6 +85,16 @@ Detail file extensions match `--format`: `.md` for markdown, `.json` for json, `
 The overview tells the LLM what exists. The detail files let it drill in on demand. `.cxpak/` is automatically added to `.gitignore`.
 
 If the repo fits within budget, you get a single file with everything — no `.cxpak/` directory needed.
+
+## Caching
+
+cxpak caches parse results in `.cxpak/cache/` to speed up re-runs. The cache is keyed on file modification time and size — when a file changes, it's automatically re-parsed.
+
+To clear the cache and all output files:
+
+```bash
+cxpak clean .
+```
 
 ## Supported Languages
 
