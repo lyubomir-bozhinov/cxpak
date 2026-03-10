@@ -1,3 +1,5 @@
+pub mod parse;
+
 use crate::parser::language::ParseResult;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

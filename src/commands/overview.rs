@@ -6,9 +6,7 @@ use crate::cli::OutputFormat;
 use crate::git;
 use crate::index::CodebaseIndex;
 use crate::output::{self, OutputSections};
-use crate::parser::LanguageRegistry;
 use crate::scanner::Scanner;
-use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 
@@ -50,72 +48,7 @@ pub fn run(
     }
 
     // 2. Parse (cache-aware)
-    if verbose {
-        eprintln!("cxpak: parsing with tree-sitter");
-    }
-    let cache_dir = path.join(".cxpak").join("cache");
-    let existing_cache = FileCache::load(&cache_dir);
-    let cache_map = existing_cache.as_map();
-
-    let registry = LanguageRegistry::new();
-    let mut parse_results = HashMap::new();
-    let mut new_cache_entries: Vec<CacheEntry> = Vec::new();
-
-    for file in &files {
-        let mtime = file_mtime(&file.absolute_path);
-        let size_bytes = file.size_bytes;
-
-        // Check for a valid cache hit
-        let cached_parse = if let Some(entry) = cache_map.get(file.relative_path.as_str()) {
-            if entry.mtime == mtime && entry.size_bytes == size_bytes {
-                Some((entry.parse_result.clone(), entry.token_count))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let parse_result = if let Some((pr, _token_count)) = cached_parse {
-            pr
-        } else {
-            // Cache miss — parse with tree-sitter
-            let mut result = None;
-            if let Some(lang_name) = &file.language {
-                if let Some(lang) = registry.get(lang_name) {
-                    let source = std::fs::read_to_string(&file.absolute_path).unwrap_or_default();
-                    let mut parser = tree_sitter::Parser::new();
-                    if parser.set_language(&lang.ts_language()).is_ok() {
-                        if let Some(tree) = parser.parse(&source, None) {
-                            result = Some(lang.extract(&source, &tree));
-                        }
-                    }
-                }
-            }
-            result
-        };
-
-        if let Some(ref pr) = parse_result {
-            parse_results.insert(file.relative_path.clone(), pr.clone());
-        }
-
-        new_cache_entries.push(CacheEntry {
-            relative_path: file.relative_path.clone(),
-            mtime,
-            size_bytes,
-            language: file.language.clone(),
-            // token_count will be filled after indexing; use cached value if available
-            token_count: cache_map
-                .get(file.relative_path.as_str())
-                .map(|e| e.token_count)
-                .unwrap_or(0),
-            parse_result,
-        });
-    }
-
-    if verbose {
-        eprintln!("cxpak: parsed {} files", parse_results.len());
-    }
+    let parse_results = crate::cache::parse::parse_with_cache(&files, path, &counter, verbose);
 
     // 3. Index
     let index = CodebaseIndex::build(files, parse_results, &counter);
@@ -212,23 +145,24 @@ pub fn run(
         }
     }
 
-    // Save updated cache (always, regardless of pack mode)
+    // Refresh the cache with accurate post-index token counts.
     {
-        let mut new_cache = FileCache::new();
-        // Update token_count from the index now that indexing is complete
-        for entry in new_cache_entries {
+        let cache_dir = path.join(".cxpak").join("cache");
+        let existing = FileCache::load(&cache_dir);
+        let mut updated = FileCache::new();
+        for entry in existing.entries {
             let token_count = index
                 .files
                 .iter()
                 .find(|f| f.relative_path == entry.relative_path)
                 .map(|f| f.token_count)
                 .unwrap_or(entry.token_count);
-            new_cache.entries.push(CacheEntry {
+            updated.entries.push(CacheEntry {
                 token_count,
                 ..entry
             });
         }
-        if let Err(e) = new_cache.save(&cache_dir) {
+        if let Err(e) = updated.save(&cache_dir) {
             if verbose {
                 eprintln!("cxpak: warning: failed to save cache: {e}");
             }
@@ -596,15 +530,6 @@ fn render_signatures(
         budgeted,
         full,
     }
-}
-
-fn file_mtime(path: &std::path::Path) -> i64 {
-    std::fs::metadata(path)
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
 }
 
 fn render_git_context(
