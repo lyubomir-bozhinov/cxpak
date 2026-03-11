@@ -1,5 +1,12 @@
 # cxpak
 
+![Rust](https://img.shields.io/badge/Rust-1.70+-orange.svg)
+![CI](https://github.com/lyubomir-bozhinov/cxpak/actions/workflows/ci.yml/badge.svg)
+![Crates.io](https://img.shields.io/crates/v/cxpak)
+![Downloads](https://img.shields.io/crates/d/cxpak)
+![Homebrew](https://img.shields.io/badge/Homebrew-tap-blue.svg)
+![License](https://img.shields.io/badge/License-MIT-green.svg)
+
 > Spends CPU cycles so you don't spend tokens. The LLM gets a briefing packet instead of a flashlight in a dark room.
 
 A Rust CLI that indexes codebases using tree-sitter and produces token-budgeted context bundles for LLMs.
@@ -110,3 +117,13 @@ cargo install cxpak --no-default-features --features lang-rust,lang-python
 ## License
 
 MIT
+
+---
+
+## About Me
+
+I build things — products, teams, systems… occasionally IKEA furniture (with mixed results). I've led engineering in everything from scrappy startups to big enterprises, but what I really love is turning ideas into real, useful tech.
+
+I'm into mentoring, scaling systems, and solving problems that make people say "well, that's impossible."
+
+Thanks for stopping by!
