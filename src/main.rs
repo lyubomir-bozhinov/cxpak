@@ -26,6 +26,7 @@ fn main() {
             all,
             git_ref,
             focus,
+            timing,
             path,
         } => {
             let token_budget = match parse_token_count(tokens) {
@@ -48,6 +49,7 @@ fn main() {
                 *verbose,
                 *all,
                 focus.as_deref(),
+                *timing,
             )
         }
         Commands::Overview {
@@ -56,6 +58,7 @@ fn main() {
             format,
             verbose,
             focus,
+            timing,
             path,
         } => {
             let token_budget = match parse_token_count(tokens) {
@@ -76,6 +79,7 @@ fn main() {
                 out.as_deref(),
                 *verbose,
                 focus.as_deref(),
+                *timing,
             )
         }
         Commands::Trace {
@@ -85,6 +89,7 @@ fn main() {
             verbose,
             all,
             focus,
+            timing,
             target,
             path,
         } => {
@@ -108,6 +113,7 @@ fn main() {
                 *verbose,
                 *all,
                 focus.as_deref(),
+                *timing,
             )
         }
     };

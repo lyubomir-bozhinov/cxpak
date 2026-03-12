@@ -27,6 +27,9 @@ pub enum Commands {
         /// Boost files under this path prefix in the ranking
         #[arg(long)]
         focus: Option<String>,
+        /// Print pipeline stage durations to stderr
+        #[arg(long)]
+        timing: bool,
         #[arg(default_value = ".")]
         path: PathBuf,
     },
@@ -53,6 +56,9 @@ pub enum Commands {
         /// Boost files under this path prefix in the ranking
         #[arg(long)]
         focus: Option<String>,
+        /// Print pipeline stage durations to stderr
+        #[arg(long)]
+        timing: bool,
         #[arg(default_value = ".")]
         path: PathBuf,
     },
@@ -71,6 +77,9 @@ pub enum Commands {
         /// Boost files under this path prefix in the ranking
         #[arg(long)]
         focus: Option<String>,
+        /// Print pipeline stage durations to stderr
+        #[arg(long)]
+        timing: bool,
         target: String,
         #[arg(default_value = ".")]
         path: PathBuf,
@@ -197,6 +206,65 @@ mod tests {
                 assert!(focus.is_none());
             }
             _ => panic!("expected Overview command"),
+        }
+    }
+
+    #[test]
+    fn test_timing_flag_parses_for_overview() {
+        let cli = Cli::try_parse_from(["cxpak", "overview", "--tokens", "50k", "--timing"])
+            .expect("should parse with --timing");
+
+        match cli.command {
+            Commands::Overview { timing, .. } => {
+                assert!(timing);
+            }
+            _ => panic!("expected Overview command"),
+        }
+    }
+
+    #[test]
+    fn test_timing_flag_defaults_to_false() {
+        let cli = Cli::try_parse_from(["cxpak", "overview", "--tokens", "50k"])
+            .expect("should parse without --timing");
+
+        match cli.command {
+            Commands::Overview { timing, .. } => {
+                assert!(!timing);
+            }
+            _ => panic!("expected Overview command"),
+        }
+    }
+
+    #[test]
+    fn test_timing_flag_parses_for_diff() {
+        let cli = Cli::try_parse_from(["cxpak", "diff", "--tokens", "50k", "--timing"])
+            .expect("should parse with --timing");
+
+        match cli.command {
+            Commands::Diff { timing, .. } => {
+                assert!(timing);
+            }
+            _ => panic!("expected Diff command"),
+        }
+    }
+
+    #[test]
+    fn test_timing_flag_parses_for_trace() {
+        let cli = Cli::try_parse_from([
+            "cxpak",
+            "trace",
+            "--tokens",
+            "50k",
+            "--timing",
+            "my_function",
+        ])
+        .expect("should parse with --timing");
+
+        match cli.command {
+            Commands::Trace { timing, .. } => {
+                assert!(timing);
+            }
+            _ => panic!("expected Trace command"),
         }
     }
 }

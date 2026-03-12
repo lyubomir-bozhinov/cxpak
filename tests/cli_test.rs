@@ -311,3 +311,50 @@ fn test_trace_with_focus() {
         .assert()
         .success();
 }
+
+#[test]
+fn test_overview_with_timing() {
+    let repo = make_test_repo();
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "overview",
+            "--tokens",
+            "50k",
+            "--timing",
+            repo.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("cxpak [timing]:"));
+}
+
+#[test]
+fn test_timing_flag_accepted_by_diff() {
+    let repo = make_test_repo();
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "diff",
+            "--tokens",
+            "50k",
+            "--timing",
+            repo.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_timing_flag_accepted_by_trace() {
+    let repo = make_test_repo();
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "trace",
+            "--tokens",
+            "50k",
+            "--timing",
+            "main",
+            repo.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+}

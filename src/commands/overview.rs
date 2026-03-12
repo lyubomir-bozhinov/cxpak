@@ -33,10 +33,13 @@ pub fn run(
     out: Option<&Path>,
     verbose: bool,
     focus: Option<&str>,
+    timing: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let counter = TokenCounter::new();
+    let total_start = std::time::Instant::now();
 
     // 1. Scan
+    let scan_start = std::time::Instant::now();
     if verbose {
         eprintln!("cxpak: scanning {}", path.display());
     }
@@ -45,15 +48,23 @@ pub fn run(
     if verbose {
         eprintln!("cxpak: found {} files", files.len());
     }
+    if timing {
+        eprintln!("cxpak [timing]: scan       {:.1?}", scan_start.elapsed());
+    }
 
     if files.is_empty() {
         return Err("no source files found".into());
     }
 
     // 2. Parse (cache-aware)
+    let parse_start = std::time::Instant::now();
     let parse_results = crate::cache::parse::parse_with_cache(&files, path, &counter, verbose);
+    if timing {
+        eprintln!("cxpak [timing]: parse      {:.1?}", parse_start.elapsed());
+    }
 
     // 3. Index
+    let index_start = std::time::Instant::now();
     let mut index = CodebaseIndex::build(files, parse_results, &counter);
 
     // 3b. Rank files by importance and sort so high-value files get budget first
@@ -86,6 +97,9 @@ pub fn run(
             index.total_files, index.total_tokens
         );
     }
+    if timing {
+        eprintln!("cxpak [timing]: index      {:.1?}", index_start.elapsed());
+    }
 
     if token_budget < index.total_tokens / 10 {
         eprintln!(
@@ -96,6 +110,7 @@ pub fn run(
     }
 
     // 4. Budget + render sections
+    let render_start = std::time::Instant::now();
     let pack_mode = index.total_tokens > token_budget;
 
     let alloc = BudgetAllocation::allocate(token_budget);
@@ -240,10 +255,17 @@ pub fn run(
         }
     }
 
+    if timing {
+        eprintln!("cxpak [timing]: render     {:.1?}", render_start.elapsed());
+    }
+
     // 5. Render to format
     let rendered = output::render(&sections, format);
 
     // 6. Output
+    if timing {
+        eprintln!("cxpak [timing]: total      {:.1?}", total_start.elapsed());
+    }
     match out {
         Some(path) => {
             std::fs::write(path, &rendered)?;

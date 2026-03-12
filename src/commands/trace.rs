@@ -19,6 +19,7 @@ pub fn run(
     verbose: bool,
     all: bool,
     _focus: Option<&str>,
+    _timing: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let counter = TokenCounter::new();
 
