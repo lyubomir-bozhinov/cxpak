@@ -147,6 +147,15 @@ Anything genuinely unreachable (OS-level failure arms) gets a comment explaining
 - New languages
 - Plugin changes (version bump in plugin.json at release)
 
-## Release
+## Release Checklist
+
+Every release must update all version references:
+
+1. `Cargo.toml` — version field
+2. `plugin/.claude-plugin/plugin.json` — version field
+3. `.claude-plugin/marketplace.json` — version field
+4. `git tag vX.Y.Z && git push origin main --tags`
+
+The Homebrew tap (`lyubomir-bozhinov/homebrew-tap`) updates automatically via CI when a tag is pushed. The plugin versions are manual.
 
 Tag as **v0.6.0** when all three workstreams land.
