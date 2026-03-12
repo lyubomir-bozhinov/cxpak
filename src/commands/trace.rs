@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::Path;
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     path: &Path,
     target: &str,
@@ -17,6 +18,7 @@ pub fn run(
     out: Option<&Path>,
     verbose: bool,
     all: bool,
+    _focus: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let counter = TokenCounter::new();
 

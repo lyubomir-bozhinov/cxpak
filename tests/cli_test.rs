@@ -239,3 +239,75 @@ fn test_overview_with_output_file() {
     let content = std::fs::read_to_string(&out).unwrap();
     assert!(content.contains("Files:"));
 }
+
+#[test]
+fn test_overview_with_focus() {
+    let repo = make_test_repo();
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "overview",
+            "--tokens",
+            "50k",
+            "--focus",
+            "src",
+            repo.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_overview_with_focus_no_match() {
+    // A focus path that matches nothing should still succeed (no boost applied).
+    let repo = make_test_repo();
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "overview",
+            "--tokens",
+            "50k",
+            "--focus",
+            "nonexistent/path",
+            repo.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_diff_with_focus() {
+    let repo = make_test_repo();
+    // Modify a file so diff has something to show.
+    std::fs::write(
+        repo.path().join("src/main.rs"),
+        "fn main() { println!(\"focused\"); }\n",
+    )
+    .unwrap();
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "diff",
+            "--tokens",
+            "50k",
+            "--focus",
+            "src",
+            repo.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_trace_with_focus() {
+    let repo = make_test_repo();
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "trace",
+            "--tokens",
+            "50k",
+            "--focus",
+            "src",
+            "main",
+            repo.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+}

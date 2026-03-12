@@ -32,6 +32,7 @@ pub fn run(
     format: &OutputFormat,
     out: Option<&Path>,
     verbose: bool,
+    focus: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let counter = TokenCounter::new();
 
@@ -63,7 +64,10 @@ pub fn run(
         .iter()
         .map(|f| f.relative_path.clone())
         .collect();
-    let scores = ranking::rank_files(&file_paths, &graph, git_ctx.as_ref());
+    let mut scores = ranking::rank_files(&file_paths, &graph, git_ctx.as_ref());
+    if let Some(focus_path) = focus {
+        ranking::apply_focus(&mut scores, focus_path, &graph);
+    }
 
     // Build path→score map and sort index.files by descending composite score
     let score_map: std::collections::HashMap<&str, f64> = scores

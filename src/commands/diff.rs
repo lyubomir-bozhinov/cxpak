@@ -85,6 +85,7 @@ pub fn extract_changes(
     Ok(changes)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     path: &Path,
     git_ref: Option<&str>,
@@ -93,6 +94,7 @@ pub fn run(
     out: Option<&Path>,
     verbose: bool,
     all: bool,
+    _focus: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Extract git changes
     if verbose {

@@ -25,6 +25,7 @@ fn main() {
             verbose,
             all,
             git_ref,
+            focus,
             path,
         } => {
             let token_budget = match parse_token_count(tokens) {
@@ -46,6 +47,7 @@ fn main() {
                 out.as_deref(),
                 *verbose,
                 *all,
+                focus.as_deref(),
             )
         }
         Commands::Overview {
@@ -53,6 +55,7 @@ fn main() {
             out,
             format,
             verbose,
+            focus,
             path,
         } => {
             let token_budget = match parse_token_count(tokens) {
@@ -66,7 +69,14 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            commands::overview::run(path, token_budget, format, out.as_deref(), *verbose)
+            commands::overview::run(
+                path,
+                token_budget,
+                format,
+                out.as_deref(),
+                *verbose,
+                focus.as_deref(),
+            )
         }
         Commands::Trace {
             tokens,
@@ -74,6 +84,7 @@ fn main() {
             format,
             verbose,
             all,
+            focus,
             target,
             path,
         } => {
@@ -96,6 +107,7 @@ fn main() {
                 out.as_deref(),
                 *verbose,
                 *all,
+                focus.as_deref(),
             )
         }
     };

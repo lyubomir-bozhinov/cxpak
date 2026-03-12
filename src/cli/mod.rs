@@ -24,6 +24,9 @@ pub enum Commands {
         format: OutputFormat,
         #[arg(long)]
         verbose: bool,
+        /// Boost files under this path prefix in the ranking
+        #[arg(long)]
+        focus: Option<String>,
         #[arg(default_value = ".")]
         path: PathBuf,
     },
@@ -47,6 +50,9 @@ pub enum Commands {
         /// Git ref to diff against (default: HEAD for working tree changes)
         #[arg(long)]
         git_ref: Option<String>,
+        /// Boost files under this path prefix in the ranking
+        #[arg(long)]
+        focus: Option<String>,
         #[arg(default_value = ".")]
         path: PathBuf,
     },
@@ -62,6 +68,9 @@ pub enum Commands {
         verbose: bool,
         #[arg(long)]
         all: bool,
+        /// Boost files under this path prefix in the ranking
+        #[arg(long)]
+        focus: Option<String>,
         target: String,
         #[arg(default_value = ".")]
         path: PathBuf,
@@ -127,5 +136,67 @@ mod tests {
         assert!(parse_token_count("abc").is_err());
         assert!(parse_token_count("").is_err());
         assert!(parse_token_count("k").is_err());
+    }
+
+    #[test]
+    fn test_focus_flag_parses_for_overview() {
+        let cli = Cli::try_parse_from([
+            "cxpak", "overview", "--tokens", "50k", "--focus", "src/auth",
+        ])
+        .expect("should parse successfully");
+
+        match cli.command {
+            Commands::Overview { focus, .. } => {
+                assert_eq!(focus.as_deref(), Some("src/auth"));
+            }
+            _ => panic!("expected Overview command"),
+        }
+    }
+
+    #[test]
+    fn test_focus_flag_parses_for_diff() {
+        let cli = Cli::try_parse_from(["cxpak", "diff", "--tokens", "50k", "--focus", "src/api"])
+            .expect("should parse successfully");
+
+        match cli.command {
+            Commands::Diff { focus, .. } => {
+                assert_eq!(focus.as_deref(), Some("src/api"));
+            }
+            _ => panic!("expected Diff command"),
+        }
+    }
+
+    #[test]
+    fn test_focus_flag_parses_for_trace() {
+        let cli = Cli::try_parse_from([
+            "cxpak",
+            "trace",
+            "--tokens",
+            "50k",
+            "--focus",
+            "src/lib",
+            "my_function",
+        ])
+        .expect("should parse successfully");
+
+        match cli.command {
+            Commands::Trace { focus, .. } => {
+                assert_eq!(focus.as_deref(), Some("src/lib"));
+            }
+            _ => panic!("expected Trace command"),
+        }
+    }
+
+    #[test]
+    fn test_focus_flag_is_optional() {
+        let cli = Cli::try_parse_from(["cxpak", "overview", "--tokens", "50k"])
+            .expect("should parse without --focus");
+
+        match cli.command {
+            Commands::Overview { focus, .. } => {
+                assert!(focus.is_none());
+            }
+            _ => panic!("expected Overview command"),
+        }
     }
 }
