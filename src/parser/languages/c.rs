@@ -355,4 +355,145 @@ mod tests {
         assert!(!typedefs.is_empty(), "expected typedef symbol");
         assert_eq!(typedefs[0].name, "uint32_t");
     }
+
+    #[test]
+    fn test_extract_struct() {
+        let source = "struct Point {\n    int x;\n    int y;\n};\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CLanguage;
+        let result = lang.extract(source, &tree);
+        let structs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Struct)
+            .collect();
+        assert!(!structs.is_empty(), "expected struct symbol");
+        assert_eq!(structs[0].name, "Point");
+        assert_eq!(structs[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_extract_enum() {
+        let source = "enum Color {\n    RED,\n    GREEN,\n    BLUE\n};\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CLanguage;
+        let result = lang.extract(source, &tree);
+        let enums: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Enum)
+            .collect();
+        assert!(!enums.is_empty(), "expected enum symbol");
+        assert_eq!(enums[0].name, "Color");
+    }
+
+    #[test]
+    fn test_extract_multiple_includes() {
+        let source = "#include <stdlib.h>\n#include <string.h>\n#include \"local.h\"\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CLanguage;
+        let result = lang.extract(source, &tree);
+        assert_eq!(result.imports.len(), 3);
+    }
+
+    #[test]
+    fn test_extract_function_pointer_param() {
+        let source = "void register_callback(void (*cb)(int)) {\n    // store cb\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CLanguage;
+        let result = lang.extract(source, &tree);
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty(), "expected function with pointer param");
+        assert_eq!(funcs[0].name, "register_callback");
+    }
+
+    #[test]
+    fn test_extract_static_function() {
+        let source = "static int helper(void) {\n    return 42;\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CLanguage;
+        let result = lang.extract(source, &tree);
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty(), "expected static function");
+        assert_eq!(funcs[0].name, "helper");
+    }
+
+    #[test]
+    fn test_extract_struct_in_declaration() {
+        let source = "struct Node {\n    int value;\n    struct Node* next;\n} node;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CLanguage;
+        let result = lang.extract(source, &tree);
+        let structs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Struct)
+            .collect();
+        assert!(!structs.is_empty(), "expected struct from declaration");
+        assert_eq!(structs[0].name, "Node");
+    }
+
+    #[test]
+    fn test_empty_source() {
+        let source = "";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CLanguage;
+        let result = lang.extract(source, &tree);
+        assert!(result.symbols.is_empty());
+        assert!(result.imports.is_empty());
+        assert!(result.exports.is_empty());
+    }
+
+    #[test]
+    fn test_typedef_struct() {
+        let source = "typedef struct {\n    float x;\n    float y;\n} Vec2;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CLanguage;
+        let result = lang.extract(source, &tree);
+        let typedefs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::TypeAlias)
+            .collect();
+        assert!(!typedefs.is_empty(), "expected typedef for struct");
+        assert_eq!(typedefs[0].name, "Vec2");
+    }
+
+    #[test]
+    fn test_multiple_functions() {
+        let source = "int foo(void) { return 1; }\nint bar(int x) { return x * 2; }\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CLanguage;
+        let result = lang.extract(source, &tree);
+        assert_eq!(result.symbols.len(), 2);
+        assert_eq!(result.exports.len(), 2);
+    }
+
+    #[test]
+    fn test_function_line_numbers() {
+        let source = "\n\nint foo(void) {\n    return 1;\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CLanguage;
+        let result = lang.extract(source, &tree);
+        assert_eq!(result.symbols[0].start_line, 3);
+        assert_eq!(result.symbols[0].end_line, 5);
+    }
 }
