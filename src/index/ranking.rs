@@ -32,12 +32,19 @@ pub fn rank_files(
 
     let max_churn = churn_map.values().copied().max().unwrap_or(1) as f64;
 
-    // Recency: 1.0 if there are recent commits, 0.0 otherwise.
-    // A more sophisticated version could track per-file last-modified dates.
-    let git_recency = git_context
-        .and_then(|g| g.commits.first())
-        .map(|_| 1.0)
-        .unwrap_or(0.0);
+    let recency_map: HashMap<&str, f64> = git_context
+        .map(|g| {
+            let max = g.file_churn.len().max(1) as f64;
+            g.file_churn
+                .iter()
+                .enumerate()
+                .map(|(i, f)| {
+                    let score = 1.0 - (i as f64 / max);
+                    (f.path.as_str(), score)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
     file_paths
         .iter()
@@ -45,6 +52,7 @@ pub fn rank_files(
             let in_degree = graph.dependents(path).len();
             let out_degree = graph.dependencies(path).map(|d| d.len()).unwrap_or(0);
             let file_churn = churn_map.get(path.as_str()).copied().unwrap_or(0) as f64 / max_churn;
+            let git_recency = recency_map.get(path.as_str()).copied().unwrap_or(0.0);
 
             let composite = in_degree as f64 * 0.4
                 + out_degree as f64 * 0.1
@@ -244,5 +252,29 @@ mod tests {
         let original = scores[0].composite;
         apply_focus(&mut scores, "nonexistent/path", &graph);
         assert_eq!(scores[0].composite, original, "should be unchanged");
+    }
+
+    #[test]
+    fn test_recency_differs_per_file() {
+        let graph = DependencyGraph::new();
+        let git = make_git_context(vec![("hot.rs", 10), ("cold.rs", 1)], vec!["2026-03-12"]);
+
+        let paths = vec!["hot.rs".into(), "cold.rs".into(), "absent.rs".into()];
+        let scores = rank_files(&paths, &graph, Some(&git));
+
+        let hot = scores.iter().find(|s| s.path == "hot.rs").unwrap();
+        let cold = scores.iter().find(|s| s.path == "cold.rs").unwrap();
+        let absent = scores.iter().find(|s| s.path == "absent.rs").unwrap();
+
+        assert!(
+            hot.git_recency > cold.git_recency,
+            "hot.rs recency {} should be > cold.rs recency {}",
+            hot.git_recency,
+            cold.git_recency
+        );
+        assert_eq!(
+            absent.git_recency, 0.0,
+            "file not in churn list should have 0.0 recency"
+        );
     }
 }
