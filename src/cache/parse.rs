@@ -3,6 +3,7 @@ use crate::cache::{CacheEntry, FileCache};
 use crate::parser::language::ParseResult;
 use crate::parser::LanguageRegistry;
 use crate::scanner::ScannedFile;
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -42,62 +43,77 @@ pub fn parse_with_cache(
     let cache_map = existing_cache.as_map();
 
     let registry = LanguageRegistry::new();
-    let mut parse_results: HashMap<String, ParseResult> = HashMap::new();
-    let mut new_cache_entries: Vec<CacheEntry> = Vec::new();
 
-    for file in files {
-        let mtime = file_mtime(&file.absolute_path);
-        let size_bytes = file.size_bytes;
+    // Parse all files in parallel. Each iteration is independent: it reads the
+    // cache map (shared read-only), creates its own tree-sitter Parser, and
+    // reads source from disk. Results are collected and then assembled
+    // sequentially below.
+    let per_file_results: Vec<(Option<ParseResult>, CacheEntry)> = files
+        .par_iter()
+        .map(|file| {
+            let mtime = file_mtime(&file.absolute_path);
+            let size_bytes = file.size_bytes;
 
-        // Check for a valid cache hit.
-        let cached_parse = if let Some(entry) = cache_map.get(file.relative_path.as_str()) {
-            if entry.mtime == mtime && entry.size_bytes == size_bytes {
-                Some((entry.parse_result.clone(), entry.token_count))
+            // Check for a valid cache hit.
+            let cached_parse = if let Some(entry) = cache_map.get(file.relative_path.as_str()) {
+                if entry.mtime == mtime && entry.size_bytes == size_bytes {
+                    Some((entry.parse_result.clone(), entry.token_count))
+                } else {
+                    None
+                }
             } else {
                 None
-            }
-        } else {
-            None
-        };
+            };
 
-        let parse_result = if let Some((pr, _token_count)) = cached_parse {
-            pr
-        } else {
-            // Cache miss — parse with tree-sitter.
-            let mut result = None;
-            if let Some(lang_name) = &file.language {
-                if let Some(lang) = registry.get(lang_name) {
-                    let source = std::fs::read_to_string(&file.absolute_path).unwrap_or_default();
-                    let mut parser = tree_sitter::Parser::new();
-                    if parser.set_language(&lang.ts_language()).is_ok() {
-                        if let Some(tree) = parser.parse(&source, None) {
-                            result = Some(lang.extract(&source, &tree));
+            let parse_result = if let Some((pr, _token_count)) = cached_parse {
+                pr
+            } else {
+                // Cache miss — parse with tree-sitter. Each thread creates its
+                // own Parser so there is no shared mutable state.
+                let mut result = None;
+                if let Some(lang_name) = &file.language {
+                    if let Some(lang) = registry.get(lang_name) {
+                        let source =
+                            std::fs::read_to_string(&file.absolute_path).unwrap_or_default();
+                        let mut parser = tree_sitter::Parser::new();
+                        if parser.set_language(&lang.ts_language()).is_ok() {
+                            if let Some(tree) = parser.parse(&source, None) {
+                                result = Some(lang.extract(&source, &tree));
+                            }
                         }
                     }
                 }
-            }
-            result
-        };
+                result
+            };
 
-        if let Some(ref pr) = parse_result {
-            parse_results.insert(file.relative_path.clone(), pr.clone());
+            // Preserve the cached token_count; it will be updated by the
+            // caller after indexing.
+            let token_count = cache_map
+                .get(file.relative_path.as_str())
+                .map(|e| e.token_count)
+                .unwrap_or(0);
+
+            let cache_entry = CacheEntry {
+                relative_path: file.relative_path.clone(),
+                mtime,
+                size_bytes,
+                language: file.language.clone(),
+                token_count,
+                parse_result: parse_result.clone(),
+            };
+
+            (parse_result, cache_entry)
+        })
+        .collect();
+
+    // Assemble results sequentially from the parallel output.
+    let mut parse_results: HashMap<String, ParseResult> = HashMap::new();
+    let mut new_cache_entries: Vec<CacheEntry> = Vec::new();
+    for (pr_opt, cache_entry) in per_file_results {
+        if let Some(ref pr) = pr_opt {
+            parse_results.insert(cache_entry.relative_path.clone(), pr.clone());
         }
-
-        // Preserve the cached token_count; it will be updated by the caller
-        // after indexing.
-        let token_count = cache_map
-            .get(file.relative_path.as_str())
-            .map(|e| e.token_count)
-            .unwrap_or(0);
-
-        new_cache_entries.push(CacheEntry {
-            relative_path: file.relative_path.clone(),
-            mtime,
-            size_bytes,
-            language: file.language.clone(),
-            token_count,
-            parse_result,
-        });
+        new_cache_entries.push(cache_entry);
     }
 
     if verbose {
@@ -312,5 +328,82 @@ mod tests {
             !second_symbols.iter().any(|n| n == "original"),
             "stale symbol 'original' should not appear after file change"
         );
+    }
+
+    // ------------------------------------------------------------------
+    // test_parse_with_cache_multiple_files
+    // ------------------------------------------------------------------
+    /// Creates a repo with several Rust source files and verifies that the
+    /// parallel implementation parses all of them correctly.
+    #[test]
+    fn test_parse_with_cache_multiple_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        // Initialise a git repo.
+        std::process::Command::new("git")
+            .args(["init", root.to_str().unwrap()])
+            .output()
+            .expect("git init");
+
+        let src_dir = root.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+
+        // Create five source files, each with a unique public function.
+        let files_and_fns = [
+            ("alpha.rs", "pub fn alpha() {}"),
+            ("beta.rs", "pub fn beta() {}"),
+            ("gamma.rs", "pub fn gamma() {}"),
+            ("delta.rs", "pub fn delta() {}"),
+            ("epsilon.rs", "pub fn epsilon() {}"),
+        ];
+
+        for (filename, source) in &files_and_fns {
+            let path = src_dir.join(filename);
+            fs::write(&path, source).unwrap();
+            std::process::Command::new("git")
+                .args([
+                    "-C",
+                    root.to_str().unwrap(),
+                    "add",
+                    &format!("src/{filename}"),
+                ])
+                .output()
+                .expect("git add");
+        }
+
+        let counter = TokenCounter::new();
+        let scanned = scan_files(&root);
+
+        // Expect all five files to be discovered.
+        assert_eq!(
+            scanned.len(),
+            5,
+            "expected 5 scanned files, got {}",
+            scanned.len()
+        );
+
+        let results = parse_with_cache(&scanned, &root, &counter, false);
+
+        // All five files should appear in the results map.
+        assert_eq!(
+            results.len(),
+            5,
+            "expected parse results for all 5 files, got {}",
+            results.len()
+        );
+
+        // Each file's unique function symbol must be present.
+        let all_symbols: Vec<String> = results
+            .values()
+            .flat_map(|pr| pr.symbols.iter().map(|s| s.name.clone()))
+            .collect();
+
+        for expected_fn in ["alpha", "beta", "gamma", "delta", "epsilon"] {
+            assert!(
+                all_symbols.iter().any(|n| n == expected_fn),
+                "expected symbol '{expected_fn}' in parallel parse results, got: {all_symbols:?}"
+            );
+        }
     }
 }
