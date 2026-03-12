@@ -1,4 +1,4 @@
-use tiktoken_rs::cl100k_base;
+use tiktoken_rs::o200k_base;
 
 pub struct TokenCounter {
     bpe: tiktoken_rs::CoreBPE,
@@ -13,7 +13,7 @@ impl Default for TokenCounter {
 impl TokenCounter {
     pub fn new() -> Self {
         Self {
-            bpe: cl100k_base().expect("failed to load cl100k_base tokenizer"),
+            bpe: o200k_base().expect("failed to load o200k_base tokenizer"),
         }
     }
 
