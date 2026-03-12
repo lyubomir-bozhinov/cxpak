@@ -358,3 +358,142 @@ fn test_timing_flag_accepted_by_trace() {
         .assert()
         .success();
 }
+
+#[test]
+fn test_trace_timing_produces_output() {
+    let repo = make_test_repo();
+    let output = Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "trace",
+            "--tokens",
+            "50k",
+            "--timing",
+            "main",
+            repo.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cxpak [timing]: scan"),
+        "stderr should contain scan timing, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("cxpak [timing]: total"),
+        "stderr should contain total timing, got: {stderr}"
+    );
+}
+
+#[test]
+fn test_diff_timing_produces_output() {
+    let repo = make_test_repo();
+    // Modify a file so diff has actual changes to process.
+    std::fs::write(
+        repo.path().join("src/main.rs"),
+        "fn main() { println!(\"changed\"); }\n",
+    )
+    .unwrap();
+
+    let output = Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "diff",
+            "--tokens",
+            "50k",
+            "--timing",
+            repo.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cxpak [timing]: scan"),
+        "stderr should contain scan timing, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("cxpak [timing]: total"),
+        "stderr should contain total timing, got: {stderr}"
+    );
+}
+
+#[test]
+fn test_trace_no_timing_by_default() {
+    let repo = make_test_repo();
+    let output = Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "trace",
+            "--tokens",
+            "50k",
+            "main",
+            repo.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("cxpak [timing]"),
+        "no timing output expected without --timing flag, got: {stderr}"
+    );
+}
+
+#[test]
+fn test_trace_focus_produces_output() {
+    let repo = make_test_repo();
+    let output = Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "trace",
+            "--tokens",
+            "50k",
+            "--focus",
+            "src/",
+            "main",
+            repo.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.is_empty(),
+        "trace with --focus should produce output"
+    );
+    assert!(
+        stdout.contains("main"),
+        "output should contain the traced symbol, got: {stdout}"
+    );
+}
+
+#[test]
+fn test_diff_focus_produces_output() {
+    let repo = make_test_repo();
+    std::fs::write(
+        repo.path().join("src/main.rs"),
+        "fn main() { println!(\"focused\"); }\n",
+    )
+    .unwrap();
+
+    let output = Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "diff",
+            "--tokens",
+            "50k",
+            "--focus",
+            "src/",
+            repo.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.is_empty(),
+        "diff with --focus should produce output"
+    );
+}
