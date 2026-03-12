@@ -394,4 +394,154 @@ using System.Linq;
             names
         );
     }
+
+    #[test]
+    fn test_extract_interface() {
+        let source = "public interface IDrawable {\n    void Draw();\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CSharpLanguage;
+        let result = lang.extract(source, &tree);
+        let interfaces: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Interface)
+            .collect();
+        assert!(!interfaces.is_empty(), "expected interface symbol");
+        assert_eq!(interfaces[0].name, "IDrawable");
+        assert_eq!(interfaces[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_extract_struct() {
+        let source = "public struct Point {\n    public int X;\n    public int Y;\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CSharpLanguage;
+        let result = lang.extract(source, &tree);
+        let structs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Struct)
+            .collect();
+        assert!(!structs.is_empty(), "expected struct symbol");
+        assert_eq!(structs[0].name, "Point");
+        assert_eq!(structs[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_extract_enum() {
+        let source = "public enum Color {\n    Red,\n    Green,\n    Blue\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CSharpLanguage;
+        let result = lang.extract(source, &tree);
+        let enums: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Enum)
+            .collect();
+        assert!(!enums.is_empty(), "expected enum symbol");
+        assert_eq!(enums[0].name, "Color");
+        assert_eq!(enums[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_extract_nested_class() {
+        let source =
+            "public class Outer {\n    public class Inner {\n        public void DoWork() {}\n    }\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CSharpLanguage;
+        let result = lang.extract(source, &tree);
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(
+            classes.len() >= 2,
+            "expected Outer and Inner classes, got {:?}",
+            classes.iter().map(|c| &c.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_extract_private_class() {
+        let source = "class InternalClass {\n    void Method() {}\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CSharpLanguage;
+        let result = lang.extract(source, &tree);
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(!classes.is_empty());
+        assert_eq!(classes[0].visibility, Visibility::Private);
+        // Private classes should NOT be exported
+        assert!(result.exports.iter().all(|e| e.name != "InternalClass"));
+    }
+
+    #[test]
+    fn test_extract_namespace_class() {
+        let source =
+            "namespace MyApp {\n    public class Service {\n        public void Run() {}\n    }\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CSharpLanguage;
+        let result = lang.extract(source, &tree);
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(!classes.is_empty(), "expected class inside namespace");
+        assert_eq!(classes[0].name, "Service");
+    }
+
+    #[test]
+    fn test_empty_source() {
+        let source = "";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CSharpLanguage;
+        let result = lang.extract(source, &tree);
+        assert!(result.symbols.is_empty());
+        assert!(result.imports.is_empty());
+        assert!(result.exports.is_empty());
+    }
+
+    #[test]
+    fn test_extract_multiple_classes() {
+        let source = "public class Foo {}\npublic class Bar {}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CSharpLanguage;
+        let result = lang.extract(source, &tree);
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert_eq!(classes.len(), 2);
+        assert_eq!(result.exports.len(), 2);
+    }
+
+    #[test]
+    fn test_extract_static_method() {
+        let source = "public class Program {\n    public static void Main(string[] args) {}\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CSharpLanguage;
+        let result = lang.extract(source, &tree);
+        let methods: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Method)
+            .collect();
+        assert!(!methods.is_empty(), "expected Main method");
+        assert_eq!(methods[0].name, "Main");
+    }
 }

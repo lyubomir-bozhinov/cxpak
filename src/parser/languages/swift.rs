@@ -361,4 +361,151 @@ import UIKit
             sources
         );
     }
+
+    #[test]
+    fn test_extract_protocol() {
+        let source = "public protocol Equatable {\n    func isEqual(to other: Self) -> Bool\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+        let protocols: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Trait)
+            .collect();
+        assert!(!protocols.is_empty(), "expected protocol symbol");
+        assert_eq!(protocols[0].name, "Equatable");
+        assert_eq!(protocols[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_extract_class() {
+        let source = "public class Animal {\n    var name: String = \"\"\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(!classes.is_empty(), "expected class symbol");
+        assert_eq!(classes[0].name, "Animal");
+        assert_eq!(classes[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_extract_enum() {
+        let source = "public enum Compass {\n    case north\n    case south\n    case east\n    case west\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+        let enums: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Enum)
+            .collect();
+        assert!(!enums.is_empty(), "expected enum symbol");
+        assert_eq!(enums[0].name, "Compass");
+        assert_eq!(enums[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_extract_private_function() {
+        let source = "func helper() -> Int {\n    return 42\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty());
+        assert_eq!(funcs[0].name, "helper");
+        assert_eq!(funcs[0].visibility, Visibility::Private);
+        assert!(
+            result.exports.is_empty(),
+            "internal function should not be exported"
+        );
+    }
+
+    #[test]
+    fn test_extract_private_protocol() {
+        let source = "protocol InternalProtocol {\n    func doWork()\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+        let protocols: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Trait)
+            .collect();
+        assert!(!protocols.is_empty());
+        assert_eq!(protocols[0].visibility, Visibility::Private);
+    }
+
+    #[test]
+    fn test_empty_source() {
+        let source = "";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+        assert!(result.symbols.is_empty());
+        assert!(result.imports.is_empty());
+        assert!(result.exports.is_empty());
+    }
+
+    #[test]
+    fn test_extract_function_signature_and_body() {
+        let source = "public func add(a: Int, b: Int) -> Int {\n    return a + b\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty());
+        assert!(!funcs[0].signature.is_empty(), "expected signature");
+        assert!(!funcs[0].body.is_empty(), "expected body");
+    }
+
+    #[test]
+    fn test_extract_multiple_imports() {
+        let source = "import Foundation\nimport UIKit\nimport SwiftUI\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+        assert_eq!(result.imports.len(), 3);
+    }
+
+    #[test]
+    fn test_extract_open_class() {
+        let source = "open class Base {\n    open func override_me() {}\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(!classes.is_empty());
+        assert_eq!(
+            classes[0].visibility,
+            Visibility::Public,
+            "open should be treated as public"
+        );
+    }
 }

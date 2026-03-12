@@ -329,4 +329,153 @@ import java.util.HashMap
             names
         );
     }
+
+    #[test]
+    fn test_extract_data_class() {
+        let source = "data class User(val name: String, val age: Int)\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = KotlinLanguage;
+        let result = lang.extract(source, &tree);
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(!classes.is_empty(), "expected data class symbol");
+        assert_eq!(classes[0].name, "User");
+        assert_eq!(classes[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_extract_object_declaration() {
+        let source = "object Singleton {\n    val instance = 42\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = KotlinLanguage;
+        let result = lang.extract(source, &tree);
+        let objects: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.name == "Singleton")
+            .collect();
+        assert!(!objects.is_empty(), "expected object symbol");
+        assert_eq!(objects[0].kind, SymbolKind::Class);
+        assert_eq!(objects[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_extract_private_function() {
+        let source = "private fun helper(): Int {\n    return 42\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = KotlinLanguage;
+        let result = lang.extract(source, &tree);
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty());
+        assert_eq!(funcs[0].name, "helper");
+        assert_eq!(funcs[0].visibility, Visibility::Private);
+        assert!(
+            result.exports.is_empty(),
+            "private function should not be exported"
+        );
+    }
+
+    #[test]
+    fn test_extract_extension_function() {
+        let source = "fun String.addExclamation(): String {\n    return this + \"!\"\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = KotlinLanguage;
+        let result = lang.extract(source, &tree);
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty(), "expected extension function");
+    }
+
+    #[test]
+    fn test_extract_sealed_class() {
+        let source = "sealed class Result {\n    class Success(val data: String) : Result()\n    class Error(val msg: String) : Result()\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = KotlinLanguage;
+        let result = lang.extract(source, &tree);
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(!classes.is_empty(), "expected sealed class");
+        assert!(
+            classes.iter().any(|c| c.name == "Result"),
+            "expected Result class"
+        );
+    }
+
+    #[test]
+    fn test_extract_wildcard_import() {
+        let source = "import kotlin.collections.*\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = KotlinLanguage;
+        let result = lang.extract(source, &tree);
+        assert_eq!(result.imports.len(), 1);
+        assert!(result.imports[0].names.contains(&"*".to_string()));
+        assert_eq!(result.imports[0].source, "kotlin.collections");
+    }
+
+    #[test]
+    fn test_empty_source() {
+        let source = "";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = KotlinLanguage;
+        let result = lang.extract(source, &tree);
+        assert!(result.symbols.is_empty());
+        assert!(result.imports.is_empty());
+        assert!(result.exports.is_empty());
+    }
+
+    #[test]
+    fn test_extract_function_with_body() {
+        let source = "fun add(a: Int, b: Int): Int {\n    return a + b\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = KotlinLanguage;
+        let result = lang.extract(source, &tree);
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty());
+        assert!(!funcs[0].body.is_empty(), "expected function body");
+        assert!(
+            !funcs[0].signature.is_empty(),
+            "expected function signature"
+        );
+    }
+
+    #[test]
+    fn test_extract_multiple_functions() {
+        let source = "fun foo(): Unit {}\nfun bar(): Unit {}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = KotlinLanguage;
+        let result = lang.extract(source, &tree);
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert_eq!(funcs.len(), 2);
+        assert_eq!(result.exports.len(), 2);
+    }
 }

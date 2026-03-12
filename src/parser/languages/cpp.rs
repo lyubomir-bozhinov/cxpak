@@ -445,4 +445,132 @@ public:
         assert!(!typedefs.is_empty(), "expected typedef symbol");
         assert_eq!(typedefs[0].name, "uint32_t");
     }
+
+    #[test]
+    fn test_extract_namespace() {
+        let source = "namespace math {\n    int add(int a, int b) { return a + b; }\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+        let ns: Vec<_> = result.symbols.iter().filter(|s| s.name == "math").collect();
+        assert!(!ns.is_empty(), "expected namespace symbol");
+    }
+
+    #[test]
+    fn test_extract_struct() {
+        let source = "struct Vec3 {\n    float x, y, z;\n};\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+        let structs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Struct)
+            .collect();
+        assert!(!structs.is_empty(), "expected struct");
+        assert_eq!(structs[0].name, "Vec3");
+    }
+
+    #[test]
+    fn test_extract_enum() {
+        let source = "enum Direction {\n    UP,\n    DOWN,\n    LEFT,\n    RIGHT\n};\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+        let enums: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Enum)
+            .collect();
+        assert!(!enums.is_empty(), "expected enum");
+        assert_eq!(enums[0].name, "Direction");
+    }
+
+    #[test]
+    fn test_extract_class_in_declaration() {
+        let source = "class Widget {\npublic:\n    void draw();\n} widget;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(!classes.is_empty(), "expected class from declaration");
+        assert_eq!(classes[0].name, "Widget");
+    }
+
+    #[test]
+    fn test_extract_struct_in_declaration() {
+        let source = "struct Data {\n    int value;\n} data;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+        let structs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Struct)
+            .collect();
+        assert!(!structs.is_empty(), "expected struct from declaration");
+        assert_eq!(structs[0].name, "Data");
+    }
+
+    #[test]
+    fn test_extract_typedef_cpp() {
+        let source = "typedef long long int64;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+        let typedefs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::TypeAlias)
+            .collect();
+        assert!(!typedefs.is_empty(), "expected typedef");
+        assert_eq!(typedefs[0].name, "int64");
+    }
+
+    #[test]
+    fn test_empty_source_cpp() {
+        let source = "";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+        assert!(result.symbols.is_empty());
+        assert!(result.imports.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_includes_cpp() {
+        let source = "#include <vector>\n#include <map>\n#include <algorithm>\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+        assert_eq!(result.imports.len(), 3);
+    }
+
+    #[test]
+    fn test_function_with_reference_param() {
+        let source = "void swap(int& a, int& b) {\n    int tmp = a;\n    a = b;\n    b = tmp;\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty());
+        assert_eq!(funcs[0].name, "swap");
+    }
 }

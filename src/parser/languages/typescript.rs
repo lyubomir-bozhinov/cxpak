@@ -419,4 +419,138 @@ mod tests {
         assert!(!aliases.is_empty(), "expected type alias symbol");
         assert_eq!(aliases[0].name, "UserId");
     }
+
+    #[test]
+    fn test_extract_class() {
+        let source = "export class Animal {\n    name: string;\n    constructor(name: string) { this.name = name; }\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = TypeScriptLanguage;
+        let result = lang.extract(source, &tree);
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(!classes.is_empty(), "expected class symbol");
+        assert_eq!(classes[0].name, "Animal");
+        assert_eq!(classes[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_extract_enum() {
+        let source = "export enum Direction {\n    Up,\n    Down,\n    Left,\n    Right\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = TypeScriptLanguage;
+        let result = lang.extract(source, &tree);
+        let enums: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Enum)
+            .collect();
+        assert!(!enums.is_empty(), "expected enum symbol");
+        assert_eq!(enums[0].name, "Direction");
+        assert_eq!(enums[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_extract_private_function() {
+        let source = "function helper(): void {}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = TypeScriptLanguage;
+        let result = lang.extract(source, &tree);
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty());
+        assert_eq!(funcs[0].name, "helper");
+        assert_eq!(funcs[0].visibility, Visibility::Private);
+        assert!(
+            result.exports.is_empty(),
+            "non-exported function should not be in exports"
+        );
+    }
+
+    #[test]
+    fn test_extract_private_interface() {
+        let source = "interface InternalConfig {\n    debug: boolean;\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = TypeScriptLanguage;
+        let result = lang.extract(source, &tree);
+        let interfaces: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Interface)
+            .collect();
+        assert!(!interfaces.is_empty());
+        assert_eq!(interfaces[0].visibility, Visibility::Private);
+    }
+
+    #[test]
+    fn test_extract_default_import() {
+        let source = "import React from 'react';\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = TypeScriptLanguage;
+        let result = lang.extract(source, &tree);
+        assert_eq!(result.imports.len(), 1);
+        assert_eq!(result.imports[0].source, "react");
+    }
+
+    #[test]
+    fn test_extract_namespace_import() {
+        let source = "import * as fs from 'fs';\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = TypeScriptLanguage;
+        let result = lang.extract(source, &tree);
+        assert_eq!(result.imports.len(), 1);
+        assert_eq!(result.imports[0].source, "fs");
+        assert!(result.imports[0].names.contains(&"*".to_string()));
+    }
+
+    #[test]
+    fn test_empty_source() {
+        let source = "";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = TypeScriptLanguage;
+        let result = lang.extract(source, &tree);
+        assert!(result.symbols.is_empty());
+        assert!(result.imports.is_empty());
+        assert!(result.exports.is_empty());
+    }
+
+    #[test]
+    fn test_extract_union_type() {
+        let source = "export type StringOrNumber = string | number;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = TypeScriptLanguage;
+        let result = lang.extract(source, &tree);
+        let types: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::TypeAlias)
+            .collect();
+        assert!(!types.is_empty());
+        assert_eq!(types[0].name, "StringOrNumber");
+        assert_eq!(types[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_extract_multiple_exports() {
+        let source = "export function foo(): void {}\nexport function bar(): void {}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = TypeScriptLanguage;
+        let result = lang.extract(source, &tree);
+        assert_eq!(result.symbols.len(), 2);
+        assert_eq!(result.exports.len(), 2);
+    }
 }

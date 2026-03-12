@@ -389,4 +389,143 @@ import java.util.HashMap;
             .expect("privateMethod not found");
         assert_eq!(priv_method.visibility, Visibility::Private);
     }
+
+    #[test]
+    fn test_extract_interface() {
+        let source = "public interface Runnable {\n    void run();\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = JavaLanguage;
+        let result = lang.extract(source, &tree);
+        let interfaces: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Interface)
+            .collect();
+        assert!(!interfaces.is_empty(), "expected interface symbol");
+        assert_eq!(interfaces[0].name, "Runnable");
+        assert_eq!(interfaces[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_extract_enum() {
+        let source = "public enum Status {\n    ACTIVE,\n    INACTIVE\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = JavaLanguage;
+        let result = lang.extract(source, &tree);
+        let enums: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Enum)
+            .collect();
+        assert!(!enums.is_empty(), "expected enum symbol");
+        assert_eq!(enums[0].name, "Status");
+        assert_eq!(enums[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_extract_constructor() {
+        let source = "public class Foo {\n    public Foo(int x) {\n        this.x = x;\n    }\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = JavaLanguage;
+        let result = lang.extract(source, &tree);
+        let constructors: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Method && s.name == "Foo")
+            .collect();
+        assert!(!constructors.is_empty(), "expected constructor");
+    }
+
+    #[test]
+    fn test_extract_inner_class() {
+        let source = "public class Outer {\n    public class Inner {\n        public void doWork() {}\n    }\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = JavaLanguage;
+        let result = lang.extract(source, &tree);
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(classes.len() >= 2, "expected Outer and Inner classes");
+    }
+
+    #[test]
+    fn test_extract_wildcard_import() {
+        let source = "import java.util.*;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = JavaLanguage;
+        let result = lang.extract(source, &tree);
+        assert_eq!(result.imports.len(), 1);
+        assert!(result.imports[0].names.contains(&"*".to_string()));
+        assert_eq!(result.imports[0].source, "java.util");
+    }
+
+    #[test]
+    fn test_extract_abstract_class() {
+        let source = "public abstract class Shape {\n    public abstract double area();\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = JavaLanguage;
+        let result = lang.extract(source, &tree);
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(!classes.is_empty());
+        assert_eq!(classes[0].name, "Shape");
+        assert_eq!(classes[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_extract_private_class() {
+        let source = "class PackagePrivate {\n    void method() {}\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = JavaLanguage;
+        let result = lang.extract(source, &tree);
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(!classes.is_empty());
+        assert_eq!(classes[0].visibility, Visibility::Private);
+        // Package-private should NOT be exported
+        assert!(result.exports.iter().all(|e| e.name != "PackagePrivate"));
+    }
+
+    #[test]
+    fn test_empty_source() {
+        let source = "";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = JavaLanguage;
+        let result = lang.extract(source, &tree);
+        assert!(result.symbols.is_empty());
+        assert!(result.imports.is_empty());
+        assert!(result.exports.is_empty());
+    }
+
+    #[test]
+    fn test_extract_static_method() {
+        let source = "public class App {\n    public static void main(String[] args) {}\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = JavaLanguage;
+        let result = lang.extract(source, &tree);
+        let methods: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Method && s.name == "main")
+            .collect();
+        assert!(!methods.is_empty(), "expected main method");
+        assert_eq!(methods[0].visibility, Visibility::Public);
+    }
 }
