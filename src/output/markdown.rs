@@ -57,6 +57,27 @@ mod tests {
     }
 
     #[test]
+    fn test_render_all_sections() {
+        let sections = OutputSections {
+            metadata: "name: test".to_string(),
+            directory_tree: "src/".to_string(),
+            module_map: "mod a".to_string(),
+            dependency_graph: "a -> b".to_string(),
+            key_files: "main.rs".to_string(),
+            signatures: "fn main()".to_string(),
+            git_context: "branch: main".to_string(),
+        };
+        let output = render(&sections);
+        assert!(output.contains("## Project Metadata"));
+        assert!(output.contains("## Directory Tree"));
+        assert!(output.contains("## Module / Component Map"));
+        assert!(output.contains("## Dependency Graph"));
+        assert!(output.contains("## Key Files"));
+        assert!(output.contains("## Function / Type Signatures"));
+        assert!(output.contains("## Git Context"));
+    }
+
+    #[test]
     fn test_render_includes_sections() {
         let sections = OutputSections {
             metadata: "Language: Rust (100%)".into(),

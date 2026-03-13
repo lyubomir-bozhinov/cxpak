@@ -142,4 +142,23 @@ mod tests {
         assert!(omitted > 0);
         assert!(result.contains("<!-- test section omitted"));
     }
+
+    #[test]
+    fn test_omission_marker_tiny_budget() {
+        // Covers the min_budget < 1000 branch (line 10)
+        let marker = omission_marker("section", 50, 500);
+        assert!(marker.contains("~50"));
+        assert!(marker.contains("500+"));
+        assert!(!marker.contains("k+"));
+    }
+
+    #[test]
+    fn test_omission_pointer_small_tokens() {
+        // Covers the omitted_tokens < 1000 branch (line 78)
+        let pointer = omission_pointer("details", "details.md", 42);
+        assert!(pointer.contains("~42"));
+        assert!(pointer.contains(".cxpak/details.md"));
+        // Small tokens should show "~42" not "~0.0k"
+        assert!(!pointer.contains("~0.0k"));
+    }
 }

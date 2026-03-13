@@ -204,6 +204,13 @@ mod tests {
     }
 
     #[test]
+    fn test_default_impl() {
+        let cache = FileCache::default();
+        assert_eq!(cache.version, CACHE_VERSION);
+        assert!(cache.entries.is_empty());
+    }
+
+    #[test]
     fn test_as_map() {
         let mut cache = FileCache::new();
         cache.entries.push(make_entry("src/main.rs"));

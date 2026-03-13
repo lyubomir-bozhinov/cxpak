@@ -389,4 +389,186 @@ import (
         assert!(paths.contains(&"fmt"));
         assert!(paths.contains(&"os"));
     }
+
+    #[test]
+    fn test_extract_method_declaration() {
+        let source = r#"package main
+
+type Point struct {
+    X float64
+    Y float64
+}
+
+func (p *Point) String() string {
+    return "point"
+}
+
+func (p Point) translate(dx float64) Point {
+    return Point{X: p.X + dx}
+}
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GoLanguage;
+        let result = lang.extract(source, &tree);
+
+        let methods: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Method)
+            .collect();
+        assert_eq!(methods.len(), 2, "expected 2 methods");
+
+        let string_method = methods.iter().find(|m| m.name == "String").unwrap();
+        assert_eq!(string_method.visibility, Visibility::Public);
+        assert!(!string_method.body.is_empty());
+        assert!(!string_method.signature.is_empty());
+
+        let translate = methods.iter().find(|m| m.name == "translate").unwrap();
+        assert_eq!(translate.visibility, Visibility::Private);
+
+        // Public method should be exported
+        let method_exports: Vec<_> = result
+            .exports
+            .iter()
+            .filter(|e| e.kind == SymbolKind::Method)
+            .collect();
+        assert_eq!(method_exports.len(), 1);
+        assert_eq!(method_exports[0].name, "String");
+    }
+
+    #[test]
+    fn test_extract_aliased_import() {
+        let source = r#"package main
+
+import (
+    f "fmt"
+    . "os"
+    _ "net/http/pprof"
+)
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GoLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert_eq!(result.imports.len(), 3);
+        let sources: Vec<&str> = result.imports.iter().map(|i| i.source.as_str()).collect();
+        assert!(
+            sources.contains(&"fmt"),
+            "expected fmt import, got: {:?}",
+            sources
+        );
+        assert!(
+            sources.contains(&"os"),
+            "expected os import, got: {:?}",
+            sources
+        );
+        assert!(
+            sources.contains(&"net/http/pprof"),
+            "expected pprof import, got: {:?}",
+            sources
+        );
+        // dot and blank_identifier branches are exercised by parsing . "os" and _ "net/http/pprof"
+        let names: Vec<&str> = result.imports.iter().map(|i| i.names[0].as_str()).collect();
+        assert!(
+            names.contains(&"."),
+            "expected dot import name, got: {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"_"),
+            "expected blank import name, got: {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn test_extract_interface_type() {
+        let source = r#"package main
+
+type Reader interface {
+    Read(p []byte) (n int, err error)
+}
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GoLanguage;
+        let result = lang.extract(source, &tree);
+
+        let interfaces: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Interface)
+            .collect();
+        assert!(!interfaces.is_empty(), "expected interface symbol");
+        assert_eq!(interfaces[0].name, "Reader");
+        assert_eq!(interfaces[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_extract_single_import() {
+        let source = r#"package main
+
+import "fmt"
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GoLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert_eq!(result.imports.len(), 1);
+        assert_eq!(result.imports[0].source, "fmt");
+    }
+
+    #[test]
+    fn test_interface_method_no_body() {
+        // Interface methods in Go have no block — covers extract_fn_body String::new() (line 59)
+        // and extract_fn_signature fallback to first_line (line 48)
+        let source = r#"package main
+
+type Reader interface {
+    Read(p []byte) (n int, err error)
+}
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GoLanguage;
+        let result = lang.extract(source, &tree);
+        let interfaces: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Interface)
+            .collect();
+        assert!(!interfaces.is_empty());
+    }
+
+    #[test]
+    fn test_extract_name_fallback() {
+        // Covers extract_name returning String::new() (line 28)
+        // with a type that uses an anonymous struct
+        let source = "package main\n\nvar _ = struct{ x int }{}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GoLanguage;
+        let result = lang.extract(source, &tree);
+        let _ = result;
+    }
+
+    #[test]
+    fn test_private_function() {
+        // Lowercase function — covers is_public returning false
+        let source = "package main\n\nfunc helper() {}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GoLanguage;
+        let result = lang.extract(source, &tree);
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty());
+        assert_eq!(funcs[0].visibility, Visibility::Private);
+    }
 }

@@ -508,4 +508,190 @@ import UIKit
             "open should be treated as public"
         );
     }
+
+    #[test]
+    fn test_extract_import_with_kind() {
+        let source = "import class Foundation.NSString\nimport func Darwin.exit\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert_eq!(result.imports.len(), 2, "expected 2 imports");
+        let sources: Vec<&str> = result.imports.iter().map(|i| i.source.as_str()).collect();
+        assert!(
+            sources.iter().any(|s| s.contains("Foundation")),
+            "expected Foundation import, got: {:?}",
+            sources
+        );
+        assert!(
+            sources.iter().any(|s| s.contains("Darwin")),
+            "expected Darwin import, got: {:?}",
+            sources
+        );
+    }
+
+    #[test]
+    fn test_extract_struct_via_class_declaration() {
+        let source = "public struct Point {\n    var x: Int\n    var y: Int\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+
+        let structs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Struct)
+            .collect();
+        assert!(
+            !structs.is_empty(),
+            "expected struct symbol, got kinds: {:?}",
+            result
+                .symbols
+                .iter()
+                .map(|s| (&s.name, &s.kind))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(structs[0].name, "Point");
+    }
+
+    #[test]
+    fn test_import_with_kind_qualifier() {
+        // "import class Foundation.NSString" should strip the kind qualifier
+        let source = "import class Foundation.NSString\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert_eq!(result.imports.len(), 1, "expected 1 import");
+        // The import kind "class" should be stripped, leaving "Foundation.NSString"
+        let imp = &result.imports[0];
+        assert!(
+            imp.source.contains("Foundation"),
+            "expected Foundation in source, got: {}",
+            imp.source
+        );
+    }
+
+    #[test]
+    fn test_import_with_func_kind() {
+        let source = "import func Darwin.C.isatty\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert_eq!(result.imports.len(), 1);
+        let imp = &result.imports[0];
+        assert!(
+            imp.source.contains("Darwin"),
+            "expected Darwin in source, got: {}",
+            imp.source
+        );
+    }
+
+    #[test]
+    fn test_enum_declaration() {
+        let source = "public enum Direction {\n    case north\n    case south\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+
+        let enums: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Enum)
+            .collect();
+        assert!(
+            !enums.is_empty(),
+            "expected enum symbol, got: {:?}",
+            result
+                .symbols
+                .iter()
+                .map(|s| (&s.name, &s.kind))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(enums[0].name, "Direction");
+        assert_eq!(enums[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_function_without_body_field() {
+        // A function signature in a protocol has no body — triggers fallback paths
+        let source = "protocol P {\n    func doWork(x: Int) -> String\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+
+        // The protocol should be extracted even though inner functions have no body
+        assert!(!result.symbols.is_empty(), "expected symbols from protocol");
+    }
+
+    #[test]
+    fn test_protocol_method_no_body() {
+        let source = "public protocol Drawable {\n    func draw()\n    func resize(to: Int)\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+
+        let protocols: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Trait)
+            .collect();
+        assert!(!protocols.is_empty());
+        assert_eq!(protocols[0].name, "Drawable");
+        assert_eq!(protocols[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_empty_import_path() {
+        // Covers the empty import path returning None (line 131)
+        let source = "import\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+        // Parser may produce an error node; imports should be empty or ignored
+        let _ = result;
+    }
+
+    #[test]
+    fn test_class_without_declaration_kind_field() {
+        // Covers the class_declaration_kind default return (line 96)
+        // A plain class should hit the default SymbolKind::Class path
+        let source = "class SimpleClass {\n    var x = 0\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(!classes.is_empty(), "expected class symbol");
+        assert_eq!(classes[0].name, "SimpleClass");
+    }
+
+    #[test]
+    fn test_function_body_via_code_block() {
+        // Triggers the code_block fallback in extract_fn_body (lines 57-61)
+        let source = "func compute() {\n    let x = 1 + 2\n    print(x)\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = SwiftLanguage;
+        let result = lang.extract(source, &tree);
+        let fns: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!fns.is_empty());
+    }
 }

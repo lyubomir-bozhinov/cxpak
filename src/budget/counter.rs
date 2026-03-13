@@ -64,4 +64,17 @@ mod tests {
         let counter = TokenCounter::new();
         assert_eq!(counter.count_or_zero(""), 0);
     }
+
+    #[test]
+    fn test_default_impl() {
+        let counter = TokenCounter::default();
+        assert!(counter.count("hello") > 0);
+    }
+
+    #[test]
+    fn test_count_or_zero_nonempty() {
+        let counter = TokenCounter::new();
+        let count = counter.count_or_zero("hello world");
+        assert!(count > 0);
+    }
 }

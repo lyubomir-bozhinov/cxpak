@@ -148,6 +148,8 @@ mod tests {
         assert!(parse_token_count("abc").is_err());
         assert!(parse_token_count("").is_err());
         assert!(parse_token_count("k").is_err());
+        assert!(parse_token_count("m").is_err()); // covers line 111
+        assert!(parse_token_count("xyzm").is_err());
     }
 
     #[test]

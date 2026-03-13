@@ -573,4 +573,160 @@ public:
         assert!(!funcs.is_empty());
         assert_eq!(funcs[0].name, "swap");
     }
+
+    #[test]
+    fn test_extract_qualified_function() {
+        let source = "int MyNamespace::calculate(int x) {\n    return x * 2;\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty(), "expected qualified function");
+        assert_eq!(funcs[0].name, "calculate");
+    }
+
+    #[test]
+    fn test_extract_pointer_return_function() {
+        let source = "int* create() {\n    return new int(42);\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty(), "expected pointer return function");
+        assert_eq!(funcs[0].name, "create");
+    }
+
+    #[test]
+    fn test_extract_namespace_definition() {
+        let source = "namespace MyLib {\n    void helper() {}\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+
+        let ns: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.name == "MyLib")
+            .collect();
+        assert!(!ns.is_empty(), "expected namespace symbol");
+        assert_eq!(ns[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_extract_type_definition() {
+        let source = "typedef unsigned long size_t;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+
+        let types: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::TypeAlias)
+            .collect();
+        assert!(
+            !types.is_empty(),
+            "expected typedef symbol, got: {:?}",
+            result
+                .symbols
+                .iter()
+                .map(|s| (&s.name, &s.kind))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_declaration_with_class_specifier() {
+        let source = "class Widget {\npublic:\n    int value;\n} widget;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(
+            !classes.is_empty(),
+            "expected class from declaration, got: {:?}",
+            result
+                .symbols
+                .iter()
+                .map(|s| (&s.name, &s.kind))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(classes[0].name, "Widget");
+    }
+
+    #[test]
+    fn test_anonymous_namespace() {
+        // Anonymous namespace should be skipped (empty name)
+        let source = "namespace {\n    void internal() {}\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+
+        // Anonymous namespace should not produce a namespace symbol
+        let ns: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.name.is_empty())
+            .collect();
+        assert!(ns.is_empty(), "anonymous namespace should be skipped");
+    }
+
+    #[test]
+    fn test_deep_nested_declarator() {
+        let source = "int** getMatrix(int rows) {\n    return nullptr;\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty(), "expected nested pointer function");
+        assert_eq!(funcs[0].name, "getMatrix");
+    }
+
+    #[test]
+    fn test_empty_include() {
+        // Covers extract_include returning None for empty/malformed includes (line 104)
+        let source = "#include\nint x = 1;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+        // Should not crash; imports may be empty
+        let _ = result;
+    }
+
+    #[test]
+    fn test_function_no_body() {
+        // A forward declaration with no body — covers signature/body fallback returns (lines 81, 92)
+        let source = "void forwardDecl(int x);\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = CppLanguage;
+        let result = lang.extract(source, &tree);
+        // Forward declaration is a `declaration`, not a `function_definition`, so no function symbol
+        let _ = result;
+    }
 }

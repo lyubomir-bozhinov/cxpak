@@ -38,3 +38,53 @@ pub fn render(sections: &OutputSections) -> String {
     };
     serde_json::to_string_pretty(&output).unwrap_or_else(|_| "{}".into())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_sections() -> OutputSections {
+        OutputSections {
+            metadata: "name: test".to_string(),
+            directory_tree: "src/".to_string(),
+            module_map: "mod a".to_string(),
+            dependency_graph: "a -> b".to_string(),
+            key_files: "main.rs".to_string(),
+            signatures: "fn main()".to_string(),
+            git_context: "branch: main".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_render_json() {
+        let sections = make_sections();
+        let output = render(&sections);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(parsed["metadata"], "name: test");
+        assert_eq!(parsed["directory_tree"], "src/");
+    }
+
+    #[test]
+    fn test_render_single_section_json() {
+        let output = render_single_section("Key Files", "main.rs");
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(parsed["key_files"], "main.rs");
+    }
+
+    #[test]
+    fn test_render_json_empty_sections_skipped() {
+        let sections = OutputSections {
+            metadata: "test".to_string(),
+            directory_tree: String::new(),
+            module_map: String::new(),
+            dependency_graph: String::new(),
+            key_files: String::new(),
+            signatures: String::new(),
+            git_context: String::new(),
+        };
+        let output = render(&sections);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert!(parsed.get("directory_tree").is_none());
+        assert_eq!(parsed["metadata"], "test");
+    }
+}

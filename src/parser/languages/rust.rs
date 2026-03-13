@@ -608,4 +608,159 @@ impl Counter {
         assert_eq!(method_exports.len(), 1);
         assert_eq!(method_exports[0].name, "increment");
     }
+
+    #[test]
+    fn test_extract_glob_import() {
+        let source = r#"
+use std::collections::*;
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RustLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert_eq!(result.imports.len(), 1);
+        assert_eq!(result.imports[0].source, "std::collections");
+        assert!(result.imports[0].names.contains(&"*".to_string()));
+    }
+
+    #[test]
+    fn test_extract_bare_identifier_import() {
+        let source = r#"
+use HashMap;
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RustLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert_eq!(result.imports.len(), 1);
+        assert!(result.imports[0].source.is_empty());
+        assert!(result.imports[0].names.contains(&"HashMap".to_string()));
+    }
+
+    #[test]
+    fn test_extract_trait_method_no_body() {
+        let source = r#"
+pub trait Serializer {
+    fn serialize(&self) -> String;
+    fn deserialize(data: &str) -> Self;
+}
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RustLanguage;
+        let result = lang.extract(source, &tree);
+
+        let traits: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Trait)
+            .collect();
+        assert!(!traits.is_empty());
+        // The trait body should contain the method declarations
+        assert!(
+            traits[0].body.contains("serialize"),
+            "body: {}",
+            traits[0].body
+        );
+    }
+
+    #[test]
+    fn test_trait_method_no_body() {
+        // Trait method declaration without body — covers extract_fn_body String::new() (line 58)
+        // and extract_fn_signature fallback to trim (line 46)
+        let source = r#"pub trait Handler {
+    fn handle(&self, req: Request) -> Response;
+    fn name(&self) -> &str;
+}
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RustLanguage;
+        let result = lang.extract(source, &tree);
+        let traits: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Trait)
+            .collect();
+        assert!(!traits.is_empty());
+    }
+
+    #[test]
+    fn test_extract_name_fallback() {
+        // Covers extract_name returning String::new() (line 31)
+        let source = "use std::io;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RustLanguage;
+        let result = lang.extract(source, &tree);
+        let _ = result;
+    }
+
+    #[test]
+    fn test_bare_use_import() {
+        // Covers extract_use_import with bare identifier (line 90)
+        let source = "use serde;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RustLanguage;
+        let result = lang.extract(source, &tree);
+        assert!(!result.imports.is_empty());
+    }
+
+    #[test]
+    fn test_type_alias_parsed() {
+        // Type aliases aren't extracted as symbols but should parse without error
+        let source = "pub type Result<T> = std::result::Result<T, Error>;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RustLanguage;
+        let result = lang.extract(source, &tree);
+        let _ = result;
+    }
+
+    #[test]
+    fn test_private_trait() {
+        // Covers Private visibility branch for trait_item (line 291)
+        let source = r#"
+trait InternalHelper {
+    fn do_work(&self);
+}
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RustLanguage;
+        let result = lang.extract(source, &tree);
+
+        let traits: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Trait)
+            .collect();
+        assert_eq!(traits.len(), 1);
+        assert_eq!(traits[0].name, "InternalHelper");
+        assert_eq!(traits[0].visibility, Visibility::Private);
+        assert!(result.exports.iter().all(|e| e.name != "InternalHelper"));
+    }
+
+    #[test]
+    fn test_private_enum() {
+        // Covers Private visibility branch for enum_item (line 260)
+        let source = "enum InternalState {\n    Active,\n    Inactive,\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RustLanguage;
+        let result = lang.extract(source, &tree);
+
+        let enums: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Enum)
+            .collect();
+        assert_eq!(enums.len(), 1);
+        assert_eq!(enums[0].name, "InternalState");
+        assert_eq!(enums[0].visibility, Visibility::Private);
+        assert!(result.exports.is_empty());
+    }
 }

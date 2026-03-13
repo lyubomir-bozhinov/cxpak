@@ -344,4 +344,145 @@ from pathlib import Path, PurePath
         assert!(second.names.contains(&"Path".to_string()));
         assert!(second.names.contains(&"PurePath".to_string()));
     }
+
+    #[test]
+    fn test_extract_from_import_with_parens() {
+        let source = "from os.path import (\n    join,\n    exists,\n    dirname\n)\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = PythonLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert_eq!(result.imports.len(), 1);
+        assert_eq!(result.imports[0].source, "os.path");
+        assert!(result.imports[0].names.len() >= 3);
+    }
+
+    #[test]
+    fn test_extract_private_class() {
+        let source = "class _InternalHelper:\n    def run(self):\n        pass\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = PythonLanguage;
+        let result = lang.extract(source, &tree);
+
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert_eq!(classes.len(), 1);
+        assert_eq!(classes[0].visibility, Visibility::Private);
+        // Private class should not be exported
+        assert!(!result.exports.iter().any(|e| e.name == "_InternalHelper"));
+    }
+
+    #[test]
+    fn test_extract_class_methods() {
+        let source = "class Dog:\n    def bark(self):\n        print('woof')\n    def _wag(self):\n        pass\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = PythonLanguage;
+        let result = lang.extract(source, &tree);
+
+        let methods: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Method)
+            .collect();
+        assert!(
+            methods.len() >= 2,
+            "expected methods, got: {:?}",
+            methods.iter().map(|m| &m.name).collect::<Vec<_>>()
+        );
+        // bark is public, _wag is private
+        let bark = methods
+            .iter()
+            .find(|m| m.name == "bark")
+            .expect("bark method");
+        assert_eq!(bark.visibility, Visibility::Public);
+        let wag = methods
+            .iter()
+            .find(|m| m.name == "_wag")
+            .expect("_wag method");
+        assert_eq!(wag.visibility, Visibility::Private);
+    }
+
+    #[test]
+    fn test_extract_multi_import() {
+        let source = "import os, sys, json\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = PythonLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(!result.imports.is_empty());
+    }
+
+    #[test]
+    fn test_extract_relative_import() {
+        let source = "from . import something\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = PythonLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert_eq!(result.imports.len(), 1);
+    }
+
+    #[test]
+    fn test_extract_name_fallback() {
+        // Covers extract_name returning String::new() (line 25) when no identifier child found
+        let source = "pass\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = PythonLanguage;
+        let result = lang.extract(source, &tree);
+        let _ = result;
+    }
+
+    #[test]
+    fn test_function_no_block_body() {
+        // Covers extract_fn_body returning String::new() (line 47) for unusual AST
+        // A one-liner function with pass
+        let source = "def stub(): pass\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = PythonLanguage;
+        let result = lang.extract(source, &tree);
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty());
+    }
+
+    #[test]
+    fn test_private_function() {
+        // Covers is_public returning false for underscore-prefixed names
+        let source = "def _internal():\n    pass\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = PythonLanguage;
+        let result = lang.extract(source, &tree);
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty());
+        assert_eq!(funcs[0].visibility, Visibility::Private);
+    }
+
+    #[test]
+    fn test_decorated_function() {
+        // Covers decorated_definition extraction
+        let source = "@staticmethod\ndef helper():\n    return True\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = PythonLanguage;
+        let result = lang.extract(source, &tree);
+        let _ = result;
+    }
 }

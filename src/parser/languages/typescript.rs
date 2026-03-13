@@ -544,6 +544,88 @@ mod tests {
     }
 
     #[test]
+    fn test_import_without_closing_brace() {
+        // Malformed import with no closing brace — should produce empty names
+        let source = "import { Foo from 'bar';\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = TypeScriptLanguage;
+        let result = lang.extract(source, &tree);
+        // Malformed imports may or may not parse; just ensure no panic
+        let _ = result.imports;
+    }
+
+    #[test]
+    fn test_private_class() {
+        // Non-exported class should be private
+        let source = "class InternalHelper {\n    method() {}\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = TypeScriptLanguage;
+        let result = lang.extract(source, &tree);
+
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(!classes.is_empty(), "expected class symbol");
+        assert_eq!(classes[0].name, "InternalHelper");
+        assert_eq!(classes[0].visibility, Visibility::Private);
+        assert!(
+            result.exports.is_empty(),
+            "private class should not be exported"
+        );
+    }
+
+    #[test]
+    fn test_private_enum() {
+        let source = "enum Color { Red, Green, Blue }\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = TypeScriptLanguage;
+        let result = lang.extract(source, &tree);
+
+        let enums: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Enum)
+            .collect();
+        assert!(!enums.is_empty(), "expected enum symbol");
+        assert_eq!(enums[0].visibility, Visibility::Private);
+    }
+
+    #[test]
+    fn test_private_type_alias() {
+        let source = "type MyType = string | number;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = TypeScriptLanguage;
+        let result = lang.extract(source, &tree);
+
+        let types: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::TypeAlias)
+            .collect();
+        assert!(!types.is_empty(), "expected type alias");
+        assert_eq!(types[0].name, "MyType");
+        assert_eq!(types[0].visibility, Visibility::Private);
+    }
+
+    #[test]
+    fn test_function_without_body() {
+        // A function declaration without a body (abstract-like)
+        let source = "export function noBody(): void;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = TypeScriptLanguage;
+        let result = lang.extract(source, &tree);
+        // Just ensure it doesn't panic; may or may not produce a symbol
+        let _ = result.symbols;
+    }
+
+    #[test]
     fn test_extract_multiple_exports() {
         let source = "export function foo(): void {}\nexport function bar(): void {}\n";
         let mut parser = make_parser();

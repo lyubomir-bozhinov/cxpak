@@ -47,3 +47,76 @@ fn escape_xml(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_sections() -> OutputSections {
+        OutputSections {
+            metadata: "name: test".to_string(),
+            directory_tree: "src/".to_string(),
+            module_map: "mod a".to_string(),
+            dependency_graph: "a -> b".to_string(),
+            key_files: "main.rs".to_string(),
+            signatures: "fn main()".to_string(),
+            git_context: "branch: main".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_render_xml() {
+        let sections = make_sections();
+        let output = render(&sections);
+        assert!(output.starts_with("<cxpak>"));
+        assert!(output.contains("<metadata>"));
+        assert!(output.contains("name: test"));
+        assert!(output.ends_with("</cxpak>\n"));
+    }
+
+    #[test]
+    fn test_render_single_section_xml() {
+        let output = render_single_section("Key Files", "main.rs");
+        assert!(output.contains("<key-files>"));
+        assert!(output.contains("main.rs"));
+        assert!(output.contains("</key-files>"));
+    }
+
+    #[test]
+    fn test_escape_xml_special_chars() {
+        let escaped = escape_xml("a & b < c > d \"e\"");
+        assert_eq!(escaped, "a &amp; b &lt; c &gt; d &quot;e&quot;");
+    }
+
+    #[test]
+    fn test_xml_empty_sections_skipped() {
+        let sections = OutputSections {
+            metadata: "test".to_string(),
+            directory_tree: String::new(),
+            module_map: String::new(),
+            dependency_graph: String::new(),
+            key_files: String::new(),
+            signatures: String::new(),
+            git_context: String::new(),
+        };
+        let output = render(&sections);
+        assert!(output.contains("<metadata>"));
+        assert!(!output.contains("<directory-tree>"));
+    }
+
+    #[test]
+    fn test_xml_omission_pointer() {
+        let sections = OutputSections {
+            metadata: "<!-- signatures full content: .cxpak/sigs.md (~5k tokens) -->".to_string(),
+            directory_tree: String::new(),
+            module_map: String::new(),
+            dependency_graph: String::new(),
+            key_files: String::new(),
+            signatures: String::new(),
+            git_context: String::new(),
+        };
+        let output = render(&sections);
+        assert!(output.contains("<detail-ref>"));
+        assert!(!output.contains("<!--"));
+    }
+}

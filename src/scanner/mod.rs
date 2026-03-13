@@ -160,3 +160,116 @@ fn detect_language(path: &Path) -> Option<String> {
     };
     Some(lang.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn setup_git_repo(dir: &Path) {
+        fs::create_dir_all(dir.join(".git")).unwrap();
+    }
+
+    #[test]
+    fn test_scanner_not_a_repository() {
+        let tmp = tempfile::tempdir().unwrap();
+        match Scanner::new(tmp.path()) {
+            Err(err) => assert!(
+                format!("{err}").contains("not a git repository"),
+                "unexpected error: {err}"
+            ),
+            Ok(_) => panic!("expected NotARepository error"),
+        }
+    }
+
+    #[test]
+    fn test_scanner_basic_scan() {
+        let tmp = tempfile::tempdir().unwrap();
+        setup_git_repo(tmp.path());
+        fs::write(tmp.path().join("main.rs"), "fn main() {}").unwrap();
+        fs::write(tmp.path().join("readme.txt"), "hello").unwrap();
+
+        let scanner = Scanner::new(tmp.path()).unwrap();
+        let files = scanner.scan().unwrap();
+        assert!(files.len() >= 2);
+
+        let rs_file = files.iter().find(|f| f.relative_path == "main.rs");
+        assert!(rs_file.is_some());
+        assert_eq!(rs_file.unwrap().language.as_deref(), Some("rust"));
+
+        let txt_file = files.iter().find(|f| f.relative_path == "readme.txt");
+        assert!(txt_file.is_some());
+        assert_eq!(txt_file.unwrap().language, None);
+    }
+
+    #[test]
+    fn test_scanner_cxpakignore() {
+        let tmp = tempfile::tempdir().unwrap();
+        setup_git_repo(tmp.path());
+        fs::write(tmp.path().join("keep.rs"), "fn keep() {}").unwrap();
+        fs::write(tmp.path().join("skip.rs"), "fn skip() {}").unwrap();
+        fs::write(tmp.path().join(".cxpakignore"), "skip.rs\n").unwrap();
+
+        let scanner = Scanner::new(tmp.path()).unwrap();
+        let files = scanner.scan().unwrap();
+        let paths: Vec<&str> = files.iter().map(|f| f.relative_path.as_str()).collect();
+        assert!(paths.contains(&"keep.rs"), "keep.rs should be present");
+        assert!(
+            !paths.contains(&"skip.rs"),
+            "skip.rs should be excluded by .cxpakignore"
+        );
+    }
+
+    #[test]
+    fn test_detect_language_all_extensions() {
+        let cases = vec![
+            ("foo.rs", Some("rust")),
+            ("foo.ts", Some("typescript")),
+            ("foo.tsx", Some("typescript")),
+            ("foo.js", Some("javascript")),
+            ("foo.jsx", Some("javascript")),
+            ("foo.mjs", Some("javascript")),
+            ("foo.cjs", Some("javascript")),
+            ("foo.java", Some("java")),
+            ("foo.py", Some("python")),
+            ("foo.go", Some("go")),
+            ("foo.c", Some("c")),
+            ("foo.h", Some("c")),
+            ("foo.cpp", Some("cpp")),
+            ("foo.hpp", Some("cpp")),
+            ("foo.cc", Some("cpp")),
+            ("foo.hh", Some("cpp")),
+            ("foo.cxx", Some("cpp")),
+            ("foo.rb", Some("ruby")),
+            ("foo.cs", Some("csharp")),
+            ("foo.swift", Some("swift")),
+            ("foo.kt", Some("kotlin")),
+            ("foo.kts", Some("kotlin")),
+            ("foo.txt", None),
+            ("foo.md", None),
+            ("foo", None),
+        ];
+        for (filename, expected) in cases {
+            let result = detect_language(Path::new(filename));
+            assert_eq!(
+                result.as_deref(),
+                expected,
+                "detect_language({filename}) = {:?}, expected {:?}",
+                result,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn test_scan_error_display() {
+        let not_repo = ScanError::NotARepository(PathBuf::from("/tmp/fake"));
+        assert!(format!("{not_repo}").contains("not a git repository"));
+
+        let walk_err = ScanError::Walk("bad entry".to_string());
+        assert!(format!("{walk_err}").contains("directory walk error"));
+
+        let override_err = ScanError::Override("bad pattern".to_string());
+        assert!(format!("{override_err}").contains("override builder error"));
+    }
+}

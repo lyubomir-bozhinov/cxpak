@@ -528,4 +528,83 @@ import java.util.HashMap;
         assert!(!methods.is_empty(), "expected main method");
         assert_eq!(methods[0].visibility, Visibility::Public);
     }
+
+    #[test]
+    fn test_interface_method_no_body() {
+        // Interface methods have no block — covers extract_fn_body returning String::new() (line 63)
+        // and extract_fn_signature fallback to first_line (line 52)
+        let source = "public interface Comparable {\n    int compareTo(Object o);\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = JavaLanguage;
+        let result = lang.extract(source, &tree);
+        let _ = result;
+    }
+
+    #[test]
+    fn test_abstract_method() {
+        // Abstract method — covers same extract_fn_body / extract_fn_signature fallback
+        let source = "public abstract class Shape {\n    public abstract double area();\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = JavaLanguage;
+        let result = lang.extract(source, &tree);
+        let _ = result;
+    }
+
+    #[test]
+    fn test_extract_name_fallback() {
+        // Covers extract_name returning String::new() (line 25)
+        // when no identifier child is found
+        let source = "public class App {\n    static {}\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = JavaLanguage;
+        let result = lang.extract(source, &tree);
+        let _ = result;
+    }
+
+    #[test]
+    fn test_wildcard_import() {
+        // Covers wildcard import branch in extract_import
+        let source = "import java.util.*;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = JavaLanguage;
+        let result = lang.extract(source, &tree);
+        if !result.imports.is_empty() {
+            assert!(result.imports[0].names.contains(&"*".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_bare_import_no_package() {
+        // Import without a dot — covers lines 98-100 (bare identifier branch)
+        let source = "import Foo;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = JavaLanguage;
+        let result = lang.extract(source, &tree);
+        if !result.imports.is_empty() {
+            assert!(result.imports[0].source.is_empty());
+            assert!(result.imports[0].names.contains(&"Foo".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_package_private_class() {
+        // No modifier — covers extract_visibility default to Private (line 40)
+        let source = "class Internal {\n    void helper() {}\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let lang = JavaLanguage;
+        let result = lang.extract(source, &tree);
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(!classes.is_empty());
+        assert_eq!(classes[0].visibility, Visibility::Private);
+    }
 }

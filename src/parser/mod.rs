@@ -73,3 +73,50 @@ impl LanguageRegistry {
         self.languages.keys().map(|k| k.as_str()).collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_creates_registry() {
+        let registry = LanguageRegistry::default();
+        assert!(registry.get("rust").is_some());
+    }
+
+    #[test]
+    fn test_supported_languages_returns_all() {
+        let registry = LanguageRegistry::new();
+        let langs = registry.supported_languages();
+        assert!(
+            langs.len() >= 12,
+            "expected at least 12 languages, got {}",
+            langs.len()
+        );
+        assert!(langs.contains(&"rust"));
+        assert!(langs.contains(&"python"));
+    }
+
+    #[test]
+    fn test_ts_language_all_registered() {
+        // Exercises ts_language() on every registered language, which is otherwise
+        // uncovered because unit tests use make_parser() directly.
+        let registry = LanguageRegistry::new();
+        for lang_name in registry.supported_languages() {
+            let lang = registry
+                .get(lang_name)
+                .expect("registered language missing");
+            let ts_lang = lang.ts_language();
+            let mut parser = tree_sitter::Parser::new();
+            parser
+                .set_language(&ts_lang)
+                .unwrap_or_else(|e| panic!("failed to set language for {}: {}", lang_name, e));
+        }
+    }
+
+    #[test]
+    fn test_get_nonexistent_language() {
+        let registry = LanguageRegistry::new();
+        assert!(registry.get("brainfuck").is_none());
+    }
+}

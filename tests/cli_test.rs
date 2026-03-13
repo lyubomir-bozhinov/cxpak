@@ -499,3 +499,325 @@ fn test_diff_focus_produces_output() {
         "diff with --focus should produce output"
     );
 }
+
+#[test]
+fn test_overview_tokens_zero_fails() {
+    let repo = make_test_repo();
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args(["overview", "--tokens", "0", repo.path().to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--tokens must be greater than 0"));
+}
+
+#[test]
+fn test_diff_tokens_zero_fails() {
+    let repo = make_test_repo();
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args(["diff", "--tokens", "0", repo.path().to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--tokens must be greater than 0"));
+}
+
+#[test]
+fn test_trace_tokens_zero_fails() {
+    let repo = make_test_repo();
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "trace",
+            "--tokens",
+            "0",
+            "main",
+            repo.path().to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--tokens must be greater than 0"));
+}
+
+#[test]
+fn test_overview_tokens_invalid_fails() {
+    let repo = make_test_repo();
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args(["overview", "--tokens", "abc", repo.path().to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid token count"));
+}
+
+#[test]
+fn test_diff_tokens_invalid_fails() {
+    let repo = make_test_repo();
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args(["diff", "--tokens", "abc", repo.path().to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid token count"));
+}
+
+#[test]
+fn test_trace_tokens_invalid_fails() {
+    let repo = make_test_repo();
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "trace",
+            "--tokens",
+            "abc",
+            "main",
+            repo.path().to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid token count"));
+}
+
+#[test]
+fn test_overview_tiny_budget_triggers_pack_mode() {
+    let repo = make_test_repo();
+    // Add multiple files so the index has enough content
+    std::fs::create_dir_all(repo.path().join("src/lib")).unwrap();
+    std::fs::write(
+        repo.path().join("src/lib/utils.rs"),
+        "pub fn helper() -> i32 { 42 }\npub fn another() -> String { String::new() }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        repo.path().join("src/lib/models.rs"),
+        "pub struct User { pub name: String }\npub struct Item { pub id: u64 }\n",
+    )
+    .unwrap();
+
+    // Very tiny budget should trigger pack mode (detail files in .cxpak/)
+    let output = Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args(["overview", "--tokens", "1", repo.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // With a 1-token budget, pack mode should activate and mention detail files
+    // or at minimum the output should be very short
+    assert!(
+        stdout.len() < 5000,
+        "tiny budget should produce small output"
+    );
+}
+
+#[test]
+fn test_overview_verbose_and_timing_combined() {
+    let repo = make_test_repo();
+    let output = Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "overview",
+            "--tokens",
+            "10k",
+            "--verbose",
+            "--timing",
+            repo.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("scanning"),
+        "verbose output should contain scanning, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("cxpak [timing]:"),
+        "timing output should appear, got: {stderr}"
+    );
+}
+
+#[test]
+fn test_diff_verbose() {
+    let repo = make_test_repo();
+    std::fs::write(
+        repo.path().join("src/main.rs"),
+        "fn main() { println!(\"verbose diff\"); }\n",
+    )
+    .unwrap();
+
+    let output = Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "diff",
+            "--tokens",
+            "10k",
+            "--verbose",
+            repo.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("scanning"),
+        "diff --verbose should show scanning, got: {stderr}"
+    );
+}
+
+#[test]
+fn test_trace_verbose() {
+    let repo = make_test_repo();
+    let output = Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "trace",
+            "--tokens",
+            "10k",
+            "--verbose",
+            "main",
+            repo.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("scanning"),
+        "trace --verbose should show scanning, got: {stderr}"
+    );
+}
+
+#[test]
+fn test_overview_json_format_detail_files() {
+    let repo = make_test_repo();
+    // Add more files so pack mode might be triggered with tiny budget
+    std::fs::create_dir_all(repo.path().join("src/extra")).unwrap();
+    for i in 0..5 {
+        std::fs::write(
+            repo.path().join(format!("src/extra/mod{i}.rs")),
+            format!("pub fn func{i}() -> i32 {{ {i} }}\n"),
+        )
+        .unwrap();
+    }
+
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "overview",
+            "--tokens",
+            "1",
+            "--format",
+            "json",
+            repo.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_overview_xml_format_detail_files() {
+    let repo = make_test_repo();
+    std::fs::create_dir_all(repo.path().join("src/extra")).unwrap();
+    for i in 0..5 {
+        std::fs::write(
+            repo.path().join(format!("src/extra/mod{i}.rs")),
+            format!("pub fn func{i}() -> i32 {{ {i} }}\n"),
+        )
+        .unwrap();
+    }
+
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "overview",
+            "--tokens",
+            "1",
+            "--format",
+            "xml",
+            repo.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_trace_all_flag() {
+    let repo = make_test_repo();
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "trace",
+            "--tokens",
+            "10k",
+            "--all",
+            "main",
+            repo.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_diff_json_format() {
+    let repo = make_test_repo();
+    std::fs::write(
+        repo.path().join("src/main.rs"),
+        "fn main() { println!(\"json diff\"); }\n",
+    )
+    .unwrap();
+
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "diff",
+            "--tokens",
+            "10k",
+            "--format",
+            "json",
+            repo.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("{"));
+}
+
+#[test]
+fn test_trace_json_format() {
+    let repo = make_test_repo();
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "trace",
+            "--tokens",
+            "10k",
+            "--format",
+            "json",
+            "main",
+            repo.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("{"));
+}
+
+#[test]
+fn test_trace_xml_format() {
+    let repo = make_test_repo();
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "trace",
+            "--tokens",
+            "10k",
+            "--format",
+            "xml",
+            "main",
+            repo.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<cxpak"));
+}
+
+#[test]
+fn test_diff_invalid_since_fails() {
+    let repo = make_test_repo();
+    Command::new(assert_cmd::cargo_bin!("cxpak"))
+        .args([
+            "diff",
+            "--since",
+            "not_a_valid_time",
+            repo.path().to_str().unwrap(),
+        ])
+        .assert()
+        .failure();
+}

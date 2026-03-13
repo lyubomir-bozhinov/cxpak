@@ -336,4 +336,138 @@ require_relative 'helper'
             sources
         );
     }
+
+    #[test]
+    fn test_extract_singleton_method() {
+        let source = r#"class Config
+  def self.load(path)
+    puts path
+  end
+
+  def self.default
+    "default"
+  end
+end
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RubyLanguage;
+        let result = lang.extract(source, &tree);
+
+        let methods: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Method)
+            .collect();
+        assert!(
+            methods.len() >= 2,
+            "expected at least 2 singleton methods, got: {:?}",
+            methods.iter().map(|m| &m.name).collect::<Vec<_>>()
+        );
+
+        // Singleton methods are exported
+        let method_exports: Vec<_> = result
+            .exports
+            .iter()
+            .filter(|e| e.kind == SymbolKind::Method)
+            .collect();
+        assert!(
+            method_exports.len() >= 2,
+            "singleton methods should be exported"
+        );
+    }
+
+    #[test]
+    fn test_non_require_call_ignored() {
+        let source = r#"puts "hello"
+print "world"
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RubyLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            result.imports.is_empty(),
+            "puts/print should not be treated as imports"
+        );
+    }
+
+    #[test]
+    fn test_top_level_singleton_method() {
+        let source = r#"def self.run
+  "running"
+end
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RubyLanguage;
+        let result = lang.extract(source, &tree);
+
+        let methods: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Method)
+            .collect();
+        assert!(
+            !methods.is_empty(),
+            "expected singleton method at top level"
+        );
+    }
+
+    #[test]
+    fn test_extract_name_fallback() {
+        // Covers extract_name returning String::new() (line 26) for unusual nodes
+        let source = "# just a comment\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RubyLanguage;
+        let result = lang.extract(source, &tree);
+        let _ = result;
+    }
+
+    #[test]
+    fn test_method_no_body_statement() {
+        // Single-line method — may lack body_statement node
+        // Covers extract_fn_body returning String::new() (line 79)
+        let source = "def empty; end\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RubyLanguage;
+        let result = lang.extract(source, &tree);
+        let methods: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Method)
+            .collect();
+        assert!(!methods.is_empty());
+    }
+
+    #[test]
+    fn test_require_relative() {
+        // Covers require_relative in extract_require
+        let source = "require_relative 'helpers/util'\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RubyLanguage;
+        let result = lang.extract(source, &tree);
+        assert!(!result.imports.is_empty());
+    }
+
+    #[test]
+    fn test_constant_name_extraction() {
+        // Module with constant name — covers extract_name with "constant" kind
+        let source = "module MyModule\n  CONST = 42\nend\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RubyLanguage;
+        let result = lang.extract(source, &tree);
+        let modules: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Trait) // Ruby modules map to Trait
+            .collect();
+        assert!(!modules.is_empty());
+        assert_eq!(modules[0].name, "MyModule");
+    }
 }

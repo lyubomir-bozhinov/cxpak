@@ -581,4 +581,36 @@ mod tests {
         assert!(parse_time_expression("abc").is_err());
         assert!(parse_time_expression("0 days").is_err());
     }
+
+    #[test]
+    fn test_parse_time_expression_zero_compact() {
+        // "0d" should fail because time must be > 0
+        assert!(parse_time_expression("0d").is_err());
+        assert!(parse_time_expression("0h").is_err());
+        assert!(parse_time_expression("0w").is_err());
+    }
+
+    #[test]
+    fn test_parse_time_expression_unknown_unit() {
+        // "2 fortnights" is an unknown unit
+        let result = parse_time_expression("2 fortnights");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("unknown time unit"),
+            "expected 'unknown time unit', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_time_expression_non_numeric_compact() {
+        // "abch" — non-numeric prefix to compact form
+        let result = parse_time_expression("abch");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_time_expression_compact_weeks() {
+        assert_eq!(parse_time_expression("2w").unwrap().as_secs(), 1209600);
+    }
 }
