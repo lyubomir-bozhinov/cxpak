@@ -267,4 +267,51 @@ mod tests {
             _ => panic!("expected Trace command"),
         }
     }
+
+    #[test]
+    fn test_overview_default_tokens() {
+        let cli =
+            Cli::try_parse_from(["cxpak", "overview"]).expect("should parse without --tokens");
+        match cli.command {
+            Commands::Overview { tokens, .. } => {
+                assert_eq!(tokens, "50k");
+            }
+            _ => panic!("expected Overview"),
+        }
+    }
+
+    #[test]
+    fn test_diff_default_tokens() {
+        let cli = Cli::try_parse_from(["cxpak", "diff"]).expect("should parse without --tokens");
+        match cli.command {
+            Commands::Diff { tokens, .. } => {
+                assert_eq!(tokens, "50k");
+            }
+            _ => panic!("expected Diff"),
+        }
+    }
+
+    #[test]
+    fn test_trace_default_tokens() {
+        let cli = Cli::try_parse_from(["cxpak", "trace", "my_symbol"])
+            .expect("should parse without --tokens");
+        match cli.command {
+            Commands::Trace { tokens, .. } => {
+                assert_eq!(tokens, "50k");
+            }
+            _ => panic!("expected Trace"),
+        }
+    }
+
+    #[test]
+    fn test_tokens_override_still_works() {
+        let cli = Cli::try_parse_from(["cxpak", "overview", "--tokens", "100k"])
+            .expect("should parse with explicit --tokens");
+        match cli.command {
+            Commands::Overview { tokens, .. } => {
+                assert_eq!(tokens, "100k");
+            }
+            _ => panic!("expected Overview"),
+        }
+    }
 }
