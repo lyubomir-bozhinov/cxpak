@@ -21,16 +21,18 @@ fn test_version_output() {
 }
 
 #[test]
-fn test_overview_requires_tokens() {
+fn test_overview_uses_default_tokens() {
+    // Since v0.7.0, --tokens defaults to 50k so overview works without it
+    let repo = make_test_repo();
     Command::new(assert_cmd::cargo_bin!("cxpak"))
-        .args(["overview"])
+        .args(["overview", repo.path().to_str().unwrap()])
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("--tokens"));
+        .success();
 }
 
 #[test]
-fn test_trace_requires_tokens_and_target() {
+fn test_trace_requires_target() {
+    // trace still requires a target argument even with default tokens
     Command::new(assert_cmd::cargo_bin!("cxpak"))
         .args(["trace"])
         .assert()
