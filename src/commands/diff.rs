@@ -10,6 +10,16 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::Path;
 
+/// Parse a human-readable time expression into a `Duration`.
+///
+/// Accepted forms: "1 day", "2 days", "1d", "3h", "1 hour", "3 hours",
+/// "1 week", "2 weeks", "1w", "1 month", "2 months", "yesterday".
+/// Returns `Err` for empty, zero-valued, or unrecognised input.
+#[allow(dead_code)]
+pub fn parse_time_expression(_expr: &str) -> Result<std::time::Duration, String> {
+    unimplemented!("parse_time_expression is not yet implemented")
+}
+
 /// A single file's changes from a git diff.
 pub struct FileChange {
     /// Relative path of the changed file.
@@ -443,5 +453,48 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let result = extract_changes(dir.path(), None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_time_expression_days() {
+        assert_eq!(parse_time_expression("1 day").unwrap().as_secs(), 86400);
+        assert_eq!(parse_time_expression("2 days").unwrap().as_secs(), 172800);
+        assert_eq!(parse_time_expression("1d").unwrap().as_secs(), 86400);
+        assert_eq!(parse_time_expression("3d").unwrap().as_secs(), 259200);
+    }
+
+    #[test]
+    fn test_parse_time_expression_hours() {
+        assert_eq!(parse_time_expression("1 hour").unwrap().as_secs(), 3600);
+        assert_eq!(parse_time_expression("3 hours").unwrap().as_secs(), 10800);
+        assert_eq!(parse_time_expression("1h").unwrap().as_secs(), 3600);
+    }
+
+    #[test]
+    fn test_parse_time_expression_weeks() {
+        assert_eq!(parse_time_expression("1 week").unwrap().as_secs(), 604800);
+        assert_eq!(parse_time_expression("2 weeks").unwrap().as_secs(), 1209600);
+        assert_eq!(parse_time_expression("1w").unwrap().as_secs(), 604800);
+    }
+
+    #[test]
+    fn test_parse_time_expression_months() {
+        assert_eq!(parse_time_expression("1 month").unwrap().as_secs(), 2592000);
+        assert_eq!(
+            parse_time_expression("2 months").unwrap().as_secs(),
+            5184000
+        );
+    }
+
+    #[test]
+    fn test_parse_time_expression_yesterday() {
+        assert_eq!(parse_time_expression("yesterday").unwrap().as_secs(), 86400);
+    }
+
+    #[test]
+    fn test_parse_time_expression_invalid() {
+        assert!(parse_time_expression("").is_err());
+        assert!(parse_time_expression("abc").is_err());
+        assert!(parse_time_expression("0 days").is_err());
     }
 }
