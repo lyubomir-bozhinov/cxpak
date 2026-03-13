@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 #[derive(Debug, Default)]
 pub struct DependencyGraph {
     pub edges: HashMap<String, HashSet<String>>,
+    pub reverse_edges: HashMap<String, HashSet<String>>,
 }
 
 impl DependencyGraph {
@@ -169,5 +170,28 @@ mod tests {
         graph.add_edge("a.rs", "b.rs");
         graph.add_edge("a.rs", "b.rs");
         assert_eq!(graph.edges["a.rs"].len(), 1);
+    }
+
+    #[test]
+    fn test_reverse_edges_maintained() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a.rs", "b.rs");
+        graph.add_edge("c.rs", "b.rs");
+        graph.add_edge("a.rs", "d.rs");
+        // reverse_edges should exist and be populated
+        assert!(graph.reverse_edges.get("b.rs").unwrap().contains("a.rs"));
+        assert!(graph.reverse_edges.get("b.rs").unwrap().contains("c.rs"));
+        assert!(graph.reverse_edges.get("d.rs").unwrap().contains("a.rs"));
+        assert_eq!(graph.reverse_edges.get("b.rs").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_dependents_large_graph() {
+        let mut graph = DependencyGraph::new();
+        for i in 0..100 {
+            graph.add_edge(&format!("file_{i}.rs"), "common.rs");
+        }
+        let deps = graph.dependents("common.rs");
+        assert_eq!(deps.len(), 100);
     }
 }
