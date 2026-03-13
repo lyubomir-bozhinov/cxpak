@@ -142,6 +142,24 @@ impl CodebaseIndex {
             .collect()
     }
 
+    /// Build a `CodebaseIndex` using pre-read file content instead of reading from disk.
+    ///
+    /// `content` maps `relative_path` -> file contents.  When an entry is present the
+    /// provided string is used directly; missing entries fall back to a disk read so
+    /// that callers are not required to pre-read every file.
+    pub fn build_with_content(
+        files: Vec<ScannedFile>,
+        parse_results: HashMap<String, ParseResult>,
+        counter: &TokenCounter,
+        content: HashMap<String, String>,
+    ) -> Self {
+        // Stub: content map is intentionally ignored so that the accompanying test
+        // can assert that this method is NOT yet doing the right thing.  Task 4 will
+        // replace this body with an implementation that actually uses `content`.
+        let _ = content;
+        Self::build(files, parse_results, counter)
+    }
+
     pub fn is_key_file(path: &str) -> bool {
         let lower = path.to_lowercase();
         let filename = lower.rsplit('/').next().unwrap_or(&lower);
@@ -359,5 +377,47 @@ mod tests {
         assert_eq!(index.language_stats["rust"].file_count, 2);
         assert_eq!(index.language_stats["python"].file_count, 1);
         assert_eq!(index.total_files, 3);
+    }
+
+    /// This test is intentionally FAILING until Task 4 implements `build_with_content`
+    /// properly.  The stub ignores the content map and falls back to `build()`, which
+    /// reads the file from disk.  Once the real implementation is in place the content
+    /// map is used directly and no disk read occurs, causing the test to pass.
+    #[test]
+    fn test_build_with_content_uses_provided_content() {
+        let counter = TokenCounter::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let file_path = dir.path().join("test.rs");
+        // Write one string to disk — the implementation must NOT return this.
+        std::fs::write(&file_path, "fn disk_version() {}").unwrap();
+
+        let files = vec![ScannedFile {
+            relative_path: "test.rs".into(),
+            absolute_path: file_path,
+            language: Some("rust".into()),
+            size_bytes: 20,
+        }];
+
+        // Provide DIFFERENT content via the content map.  A correct implementation
+        // must use this string rather than reading from disk.
+        let mut content_map = HashMap::new();
+        content_map.insert(
+            "test.rs".to_string(),
+            "fn memory_version() { /* extra content here */ }".to_string(),
+        );
+
+        let index = CodebaseIndex::build_with_content(files, HashMap::new(), &counter, content_map);
+
+        assert_eq!(index.files.len(), 1);
+        assert!(
+            index.files[0].content.contains("memory_version"),
+            "build_with_content should use provided content, not read from disk. Got: {}",
+            index.files[0].content
+        );
+        assert!(
+            !index.files[0].content.contains("disk_version"),
+            "build_with_content should NOT read from disk when content is provided. Got: {}",
+            index.files[0].content
+        );
     }
 }
