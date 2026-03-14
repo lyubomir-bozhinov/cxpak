@@ -21,6 +21,26 @@ fn main() {
     let result = match &cli.command {
         Commands::Clean { path } => commands::clean::run(path),
         #[cfg(feature = "daemon")]
+        Commands::Serve {
+            port,
+            tokens,
+            verbose,
+            path,
+        } => {
+            let token_budget = match parse_token_count(tokens) {
+                Ok(0) => {
+                    eprintln!("Error: --tokens must be greater than 0");
+                    std::process::exit(1);
+                }
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            };
+            commands::serve::run(path, *port, token_budget, *verbose)
+        }
+        #[cfg(feature = "daemon")]
         Commands::Watch {
             tokens,
             format,

@@ -65,6 +65,18 @@ pub enum Commands {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// Start HTTP server with hot index
+    #[cfg(feature = "daemon")]
+    Serve {
+        #[arg(long, default_value = "3000")]
+        port: u16,
+        #[arg(long, default_value = "50k")]
+        tokens: String,
+        #[arg(long)]
+        verbose: bool,
+        #[arg(default_value = ".")]
+        path: PathBuf,
+    },
     /// Watch for file changes and keep index hot
     #[cfg(feature = "daemon")]
     Watch {
