@@ -187,7 +187,7 @@ mod serve_tests {
         assert_eq!(json["format"], "json");
         assert_eq!(json["token_budget"], 10_000);
         assert!(json["total_files"].as_u64().unwrap() >= 2);
-        assert!(json["languages"].as_array().unwrap().len() >= 1);
+        assert!(!json["languages"].as_array().unwrap().is_empty());
 
         child.kill().ok();
         child.wait().ok();
@@ -564,7 +564,7 @@ mod serve_tests {
         let content = response["result"]["content"][0]["text"].as_str().unwrap();
         let overview: Value = serde_json::from_str(content).unwrap();
         assert!(overview["total_files"].as_u64().unwrap() >= 2);
-        assert!(overview["languages"].as_array().unwrap().len() >= 1);
+        assert!(!overview["languages"].as_array().unwrap().is_empty());
 
         child.kill().ok();
         child.wait().ok();
