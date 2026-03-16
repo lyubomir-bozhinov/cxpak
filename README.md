@@ -60,6 +60,9 @@ cxpak overview --tokens 50k .
 # Write output to a file
 cxpak overview --tokens 50k --out context.md .
 
+# Focus on a specific directory (boosts ranking)
+cxpak overview --tokens 50k --focus src/api .
+
 # Trace from a function/error, pack relevant code paths
 cxpak trace --tokens 50k "handle_request" .
 
@@ -76,12 +79,60 @@ cxpak diff --tokens 50k .
 # Diff against a specific ref
 cxpak diff --tokens 50k --git-ref main .
 
+# Diff by time range
+cxpak diff --tokens 50k --since "1 week" .
+
 # Full dependency graph context
 cxpak diff --tokens 50k --all .
+
+# Print pipeline timing info
+cxpak overview --tokens 50k --timing .
 
 # Clean cache and output files
 cxpak clean .
 ```
+
+## Daemon Mode
+
+With the `daemon` feature flag, cxpak can run as a persistent server with a hot index that updates on file changes.
+
+```bash
+# Install with daemon support
+cargo install cxpak --features daemon
+
+# Watch for file changes and keep index hot
+cxpak watch .
+
+# Start HTTP server (default port 3000)
+cxpak serve .
+cxpak serve --port 8080 .
+
+# Start as MCP server over stdio
+cxpak serve --mcp .
+```
+
+### HTTP API
+
+When running `cxpak serve`, these endpoints are available:
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health` | Health check |
+| `GET /stats` | Language stats and token counts |
+| `GET /overview?tokens=50000` | Structured repo summary |
+| `GET /trace?target=handle_request` | Trace a symbol through dependencies |
+| `GET /diff?git_ref=HEAD~1` | Show changes with dependency context |
+
+### MCP Server
+
+When running `cxpak serve --mcp`, cxpak speaks [Model Context Protocol](https://modelcontextprotocol.io/) over stdin/stdout. It exposes four tools:
+
+| Tool | Description |
+|------|-------------|
+| `cxpak_overview` | Structured repo summary |
+| `cxpak_trace` | Trace a symbol through dependencies |
+| `cxpak_stats` | Language stats and token counts |
+| `cxpak_diff` | Show changes with dependency context |
 
 ## What You Get
 
