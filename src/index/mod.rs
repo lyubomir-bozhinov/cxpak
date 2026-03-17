@@ -34,7 +34,7 @@ pub struct LanguageStats {
     pub total_tokens: usize,
 }
 
-fn compute_term_frequencies(content: &str) -> HashMap<String, u32> {
+pub(crate) fn compute_term_frequencies(content: &str) -> HashMap<String, u32> {
     let mut counts: HashMap<String, u32> = HashMap::new();
     for word in content.split(|c: char| !c.is_alphanumeric() && c != '_') {
         if word.len() < 2 {
@@ -49,7 +49,7 @@ fn compute_term_frequencies(content: &str) -> HashMap<String, u32> {
     counts
 }
 
-fn split_identifier(s: &str) -> Vec<String> {
+pub(crate) fn split_identifier(s: &str) -> Vec<String> {
     let mut parts = Vec::new();
     for segment in s.split('_') {
         if segment.is_empty() {

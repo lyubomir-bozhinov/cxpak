@@ -212,8 +212,6 @@ mod tests {
         assert_eq!(results.len(), 3);
     }
 
-    // Will pass after Task 3 implements real signals
-    #[ignore]
     #[test]
     fn test_relevant_file_scores_higher() {
         let index = make_test_index();
@@ -242,8 +240,6 @@ mod tests {
         );
     }
 
-    // Will pass after Task 3 implements real signals
-    #[ignore]
     #[test]
     fn test_custom_weights() {
         let index = make_test_index();

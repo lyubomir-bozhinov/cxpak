@@ -1,46 +1,517 @@
 use crate::index::CodebaseIndex;
 use crate::relevance::SignalResult;
+use std::collections::HashSet;
 
-/// Tokenizes query + file path segments, computes Jaccard similarity.
+/// Tokenize a string into lowercase parts split on non-alphanumeric chars and underscores.
+/// Also includes the lowercased whole word to handle all-caps identifiers (e.g., "API" -> "api").
+fn tokenize(s: &str) -> HashSet<String> {
+    let mut tokens = HashSet::new();
+    for word in s.split(|c: char| !c.is_alphanumeric() && c != '_') {
+        let lower = word.to_lowercase();
+        if lower.len() >= 2 {
+            tokens.insert(lower);
+        }
+        for part in crate::index::split_identifier(word) {
+            if part.len() >= 2 {
+                tokens.insert(part);
+            }
+        }
+    }
+    tokens
+}
+
+/// PathSimilarity: Tokenize query + file path segments, compute Jaccard similarity.
 pub fn path_similarity(query: &str, file_path: &str) -> SignalResult {
-    // Stub — will be implemented in Task 3
-    let _ = (query, file_path);
+    let query_tokens = tokenize(query);
+    // For the path, also split on '/' and '.'
+    let path_tokens: HashSet<String> = file_path
+        .split(['/', '.', '_', '-'])
+        .flat_map(crate::index::split_identifier)
+        .filter(|t| t.len() >= 2)
+        .collect();
+
+    if query_tokens.is_empty() || path_tokens.is_empty() {
+        return SignalResult {
+            name: "path_similarity",
+            score: 0.0,
+            detail: "empty tokens".to_string(),
+        };
+    }
+
+    let intersection = query_tokens.intersection(&path_tokens).count();
+    // Blend query coverage (recall) and path coverage (precision) with
+    // heavier weight on query coverage so that matching all query terms
+    // scores high even when the path has many extra segments.
+    let query_coverage = intersection as f64 / query_tokens.len() as f64;
+    let path_coverage = intersection as f64 / path_tokens.len() as f64;
+    let score = 0.7 * query_coverage + 0.3 * path_coverage;
+
     SignalResult {
         name: "path_similarity",
-        score: 0.0,
-        detail: "stub".to_string(),
+        score,
+        detail: format!(
+            "score={:.2}, qcov={:.2}, pcov={:.2}",
+            score, query_coverage, path_coverage
+        ),
     }
 }
 
-/// Fuzzy match query terms against function/struct/class names in file.
+/// SymbolMatch: Fuzzy match query terms against function/struct/class names in file.
 pub fn symbol_match(query: &str, file_path: &str, index: &CodebaseIndex) -> SignalResult {
-    // Stub — will be implemented in Task 3
-    let _ = (query, file_path, index);
+    let file = match index.files.iter().find(|f| f.relative_path == file_path) {
+        Some(f) => f,
+        None => {
+            return SignalResult {
+                name: "symbol_match",
+                score: 0.0,
+                detail: "file not found".to_string(),
+            }
+        }
+    };
+
+    let symbols = match &file.parse_result {
+        Some(pr) => &pr.symbols,
+        None => {
+            return SignalResult {
+                name: "symbol_match",
+                score: 0.0,
+                detail: "no parse result".to_string(),
+            }
+        }
+    };
+
+    if symbols.is_empty() {
+        return SignalResult {
+            name: "symbol_match",
+            score: 0.0,
+            detail: "no symbols".to_string(),
+        };
+    }
+
+    let query_tokens = tokenize(query);
+    if query_tokens.is_empty() {
+        return SignalResult {
+            name: "symbol_match",
+            score: 0.0,
+            detail: "empty query".to_string(),
+        };
+    }
+
+    let mut best_score = 0.0_f64;
+    let mut best_symbol = String::new();
+
+    for symbol in symbols {
+        let symbol_tokens = tokenize(&symbol.name);
+        if symbol_tokens.is_empty() {
+            continue;
+        }
+        let intersection = query_tokens.intersection(&symbol_tokens).count();
+        let union = query_tokens.union(&symbol_tokens).count();
+        let score = if union > 0 {
+            intersection as f64 / union as f64
+        } else {
+            0.0
+        };
+        if score > best_score {
+            best_score = score;
+            best_symbol = symbol.name.clone();
+        }
+    }
+
     SignalResult {
         name: "symbol_match",
-        score: 0.0,
-        detail: "stub".to_string(),
+        score: best_score,
+        detail: if best_score > 0.0 {
+            format!("matched: {} (score={:.2})", best_symbol, best_score)
+        } else {
+            "no matches".to_string()
+        },
     }
 }
 
-/// Boost if file imports/is imported by high-scoring files.
+/// ImportProximity: Boost if file imports or is imported by other files.
+/// Returns 0.5 (neutral) if no connections, scales up with more connections (capped at 10).
 pub fn import_proximity(file_path: &str, index: &CodebaseIndex) -> SignalResult {
-    // Stub — will be implemented in Task 3
-    let _ = (file_path, index);
+    let file = match index.files.iter().find(|f| f.relative_path == file_path) {
+        Some(f) => f,
+        None => {
+            return SignalResult {
+                name: "import_proximity",
+                score: 0.5,
+                detail: "file not found".to_string(),
+            }
+        }
+    };
+
+    // Count outgoing imports from this file
+    let outgoing = file
+        .parse_result
+        .as_ref()
+        .map(|pr| pr.imports.len())
+        .unwrap_or(0);
+
+    // Count incoming imports (other files importing things from this file)
+    let incoming = index
+        .files
+        .iter()
+        .filter(|f| f.relative_path != file_path)
+        .filter(|f| {
+            f.parse_result.as_ref().is_some_and(|pr| {
+                pr.imports.iter().any(|imp| {
+                    // Check if import source references this file's path
+                    let source_lower = imp.source.to_lowercase();
+                    let path_stem = file_path
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(file_path)
+                        .split('.')
+                        .next()
+                        .unwrap_or("")
+                        .to_lowercase();
+                    source_lower.contains(&path_stem) && path_stem.len() >= 2
+                })
+            })
+        })
+        .count();
+
+    let connections = outgoing + incoming;
+    if connections == 0 {
+        return SignalResult {
+            name: "import_proximity",
+            score: 0.5, // neutral
+            detail: "no imports".to_string(),
+        };
+    }
+
+    // Scale: 0.5 (neutral) up to 1.0, capped at 10 connections
+    let score = 0.5 + 0.5 * (connections.min(10) as f64 / 10.0);
+
     SignalResult {
         name: "import_proximity",
-        score: 0.0,
-        detail: "stub".to_string(),
+        score,
+        detail: format!(
+            "connections={} (out={}, in={})",
+            connections, outgoing, incoming
+        ),
     }
 }
 
-/// Lightweight TF of query terms in file content.
+/// TermFrequency: Lightweight TF of query terms in file content.
 pub fn term_frequency(query: &str, file_path: &str, index: &CodebaseIndex) -> SignalResult {
-    // Stub — will be implemented in Task 3
-    let _ = (query, file_path, index);
+    let tf_map = match index.term_frequencies.get(file_path) {
+        Some(m) => m,
+        None => {
+            return SignalResult {
+                name: "term_frequency",
+                score: 0.0,
+                detail: "file not found".to_string(),
+            }
+        }
+    };
+
+    if tf_map.is_empty() {
+        return SignalResult {
+            name: "term_frequency",
+            score: 0.0,
+            detail: "no terms".to_string(),
+        };
+    }
+
+    let query_tokens = tokenize(query);
+    if query_tokens.is_empty() {
+        return SignalResult {
+            name: "term_frequency",
+            score: 0.0,
+            detail: "empty query".to_string(),
+        };
+    }
+
+    let total_terms: u32 = tf_map.values().sum();
+    if total_terms == 0 {
+        return SignalResult {
+            name: "term_frequency",
+            score: 0.0,
+            detail: "no terms".to_string(),
+        };
+    }
+
+    let mut matched_count: u32 = 0;
+    let mut matched_terms = Vec::new();
+    for token in &query_tokens {
+        if let Some(&count) = tf_map.get(token.as_str()) {
+            matched_count += count;
+            matched_terms.push(format!("{}={}", token, count));
+        }
+    }
+
+    if matched_count == 0 {
+        return SignalResult {
+            name: "term_frequency",
+            score: 0.0,
+            detail: "no matching terms".to_string(),
+        };
+    }
+
+    // Normalize: ratio of matched term occurrences to total terms, clamped to 1.0
+    let score = (matched_count as f64 / total_terms as f64).min(1.0);
+
     SignalResult {
         name: "term_frequency",
-        score: 0.0,
-        detail: "stub".to_string(),
+        score,
+        detail: format!("tf={:.3}, terms: {}", score, matched_terms.join(", ")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::budget::counter::TokenCounter;
+    use crate::parser::language::{Import, ParseResult, Symbol, SymbolKind, Visibility};
+    use crate::scanner::ScannedFile;
+    use std::collections::HashMap;
+
+    // --- PathSimilarity tests ---
+
+    #[test]
+    fn test_path_similarity_exact_match() {
+        let result = path_similarity("api mod", "src/api/mod.rs");
+        assert!(
+            result.score > 0.8,
+            "exact path segments should score high: {}",
+            result.score
+        );
+    }
+
+    #[test]
+    fn test_path_similarity_partial_match() {
+        let result = path_similarity("api", "src/api/middleware.rs");
+        assert!(result.score > 0.0 && result.score < 1.0);
+    }
+
+    #[test]
+    fn test_path_similarity_no_overlap() {
+        let result = path_similarity("database", "src/api/mod.rs");
+        assert!(
+            result.score < 0.2,
+            "no overlap should score near zero: {}",
+            result.score
+        );
+    }
+
+    #[test]
+    fn test_path_similarity_case_insensitive() {
+        let r1 = path_similarity("API", "src/api/mod.rs");
+        let r2 = path_similarity("api", "src/api/mod.rs");
+        assert!((r1.score - r2.score).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_path_similarity_nested_paths() {
+        let result = path_similarity("middleware", "src/api/middleware/rate_limiter.rs");
+        assert!(result.score > 0.3);
+    }
+
+    // --- SymbolMatch tests ---
+
+    fn make_symbol_index() -> CodebaseIndex {
+        let counter = TokenCounter::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let fp = dir.path().join("handler.rs");
+        std::fs::write(&fp, "pub fn handle_api_request() {}").unwrap();
+        let files = vec![ScannedFile {
+            relative_path: "handler.rs".into(),
+            absolute_path: fp,
+            language: Some("rust".into()),
+            size_bytes: 30,
+        }];
+        let mut pr = HashMap::new();
+        pr.insert(
+            "handler.rs".to_string(),
+            ParseResult {
+                symbols: vec![Symbol {
+                    name: "handle_api_request".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    signature: "pub fn handle_api_request()".into(),
+                    body: "{}".into(),
+                    start_line: 1,
+                    end_line: 1,
+                }],
+                imports: vec![],
+                exports: vec![],
+            },
+        );
+        CodebaseIndex::build(files, pr, &counter)
+    }
+
+    #[test]
+    fn test_symbol_match_exact_hit() {
+        let index = make_symbol_index();
+        let result = symbol_match("handle_api_request", "handler.rs", &index);
+        assert!(
+            result.score > 0.8,
+            "exact symbol match should be high: {}",
+            result.score
+        );
+    }
+
+    #[test]
+    fn test_symbol_match_fuzzy() {
+        let index = make_symbol_index();
+        let result = symbol_match("api request", "handler.rs", &index);
+        assert!(
+            result.score > 0.3,
+            "fuzzy match should score mid-range: {}",
+            result.score
+        );
+    }
+
+    #[test]
+    fn test_symbol_match_no_match() {
+        let index = make_symbol_index();
+        let result = symbol_match("database migration", "handler.rs", &index);
+        assert!(
+            result.score < 0.2,
+            "no match should be low: {}",
+            result.score
+        );
+    }
+
+    #[test]
+    fn test_symbol_match_case_insensitive() {
+        let index = make_symbol_index();
+        let result = symbol_match("Handle_API_Request", "handler.rs", &index);
+        assert!(result.score > 0.5);
+    }
+
+    #[test]
+    fn test_symbol_match_no_symbols() {
+        let counter = TokenCounter::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let fp = dir.path().join("empty.rs");
+        std::fs::write(&fp, "// no symbols").unwrap();
+        let files = vec![ScannedFile {
+            relative_path: "empty.rs".into(),
+            absolute_path: fp,
+            language: Some("rust".into()),
+            size_bytes: 13,
+        }];
+        let index = CodebaseIndex::build(files, HashMap::new(), &counter);
+        let result = symbol_match("anything", "empty.rs", &index);
+        assert_eq!(result.score, 0.0);
+    }
+
+    // --- ImportProximity tests ---
+
+    #[test]
+    fn test_import_proximity_with_imports() {
+        let counter = TokenCounter::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let fp1 = dir.path().join("a.rs");
+        let fp2 = dir.path().join("b.rs");
+        std::fs::write(&fp1, "use b;").unwrap();
+        std::fs::write(&fp2, "pub fn b() {}").unwrap();
+        let files = vec![
+            ScannedFile {
+                relative_path: "a.rs".into(),
+                absolute_path: fp1,
+                language: Some("rust".into()),
+                size_bytes: 6,
+            },
+            ScannedFile {
+                relative_path: "b.rs".into(),
+                absolute_path: fp2,
+                language: Some("rust".into()),
+                size_bytes: 14,
+            },
+        ];
+        let mut pr = HashMap::new();
+        pr.insert(
+            "a.rs".to_string(),
+            ParseResult {
+                symbols: vec![],
+                imports: vec![Import {
+                    source: "b".into(),
+                    names: vec!["b".into()],
+                }],
+                exports: vec![],
+            },
+        );
+        let index = CodebaseIndex::build(files, pr, &counter);
+        let result = import_proximity("a.rs", &index);
+        assert!(result.score >= 0.5);
+    }
+
+    #[test]
+    fn test_import_proximity_no_imports() {
+        let counter = TokenCounter::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let fp = dir.path().join("standalone.rs");
+        std::fs::write(&fp, "fn standalone() {}").unwrap();
+        let files = vec![ScannedFile {
+            relative_path: "standalone.rs".into(),
+            absolute_path: fp,
+            language: Some("rust".into()),
+            size_bytes: 18,
+        }];
+        let index = CodebaseIndex::build(files, HashMap::new(), &counter);
+        let result = import_proximity("standalone.rs", &index);
+        assert!(
+            (result.score - 0.5).abs() < 0.01,
+            "no imports should be neutral (0.5): {}",
+            result.score
+        );
+    }
+
+    // --- TermFrequency tests ---
+
+    #[test]
+    fn test_term_frequency_high_frequency() {
+        let counter = TokenCounter::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let fp = dir.path().join("rate.rs");
+        std::fs::write(
+            &fp,
+            "fn rate_limit() { check_rate(); apply_rate(); rate_exceeded(); }",
+        )
+        .unwrap();
+        let files = vec![ScannedFile {
+            relative_path: "rate.rs".into(),
+            absolute_path: fp,
+            language: Some("rust".into()),
+            size_bytes: 62,
+        }];
+        let index = CodebaseIndex::build(files, HashMap::new(), &counter);
+        let result = term_frequency("rate limit", "rate.rs", &index);
+        assert!(
+            result.score > 0.5,
+            "high term frequency should score high: {}",
+            result.score
+        );
+    }
+
+    #[test]
+    fn test_term_frequency_missing_terms() {
+        let counter = TokenCounter::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let fp = dir.path().join("unrelated.rs");
+        std::fs::write(&fp, "fn hello_world() {}").unwrap();
+        let files = vec![ScannedFile {
+            relative_path: "unrelated.rs".into(),
+            absolute_path: fp,
+            language: Some("rust".into()),
+            size_bytes: 20,
+        }];
+        let index = CodebaseIndex::build(files, HashMap::new(), &counter);
+        let result = term_frequency("database migration", "unrelated.rs", &index);
+        assert_eq!(result.score, 0.0);
+    }
+
+    #[test]
+    fn test_term_frequency_nonexistent_file() {
+        let counter = TokenCounter::new();
+        let index = CodebaseIndex::build(vec![], HashMap::new(), &counter);
+        let result = term_frequency("test", "nonexistent.rs", &index);
+        assert_eq!(result.score, 0.0);
     }
 }
