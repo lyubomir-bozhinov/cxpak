@@ -1,5 +1,5 @@
 use super::ScoredFile;
-use crate::index::graph::build_dependency_graph;
+use crate::index::graph::{build_dependency_graph, DependencyGraph};
 use crate::index::CodebaseIndex;
 use std::collections::HashMap;
 
@@ -11,9 +11,11 @@ pub const FANOUT_DISCOUNT: f64 = 0.7;
 
 /// Select seed files above threshold, then fan out to 1-hop dependency neighbors.
 ///
+/// If `prebuilt_graph` is `Some`, uses it directly; otherwise builds one internally.
+///
 /// Algorithm:
 /// 1. Filter scored files above threshold -> seeds
-/// 2. Build dependency graph via `build_dependency_graph(index)`
+/// 2. Use or build dependency graph
 /// 3. For each seed, look up 1-hop neighbors in the graph (both directions)
 /// 4. For each neighbor not already a seed, add with score = seed_score * FANOUT_DISCOUNT
 /// 5. If a neighbor was added by multiple seeds, keep the highest score
@@ -24,6 +26,17 @@ pub fn select_seeds(
     index: &CodebaseIndex,
     threshold: f64,
     limit: usize,
+) -> Vec<ScoredFile> {
+    select_seeds_with_graph(scored, index, threshold, limit, None)
+}
+
+/// Like `select_seeds` but accepts a pre-built dependency graph to avoid redundant work.
+pub fn select_seeds_with_graph(
+    scored: &[ScoredFile],
+    index: &CodebaseIndex,
+    threshold: f64,
+    limit: usize,
+    prebuilt_graph: Option<&DependencyGraph>,
 ) -> Vec<ScoredFile> {
     // Step 1: Filter above threshold
     let mut result_map: HashMap<String, ScoredFile> = HashMap::new();
@@ -38,8 +51,15 @@ pub fn select_seeds(
         return Vec::new();
     }
 
-    // Step 2: Build dependency graph
-    let graph = build_dependency_graph(index);
+    // Step 2: Use prebuilt or build dependency graph
+    let owned_graph;
+    let graph = match prebuilt_graph {
+        Some(g) => g,
+        None => {
+            owned_graph = build_dependency_graph(index);
+            &owned_graph
+        }
+    };
 
     // Step 3-5: Fan out to 1-hop neighbors
     let seed_paths: Vec<String> = result_map.keys().cloned().collect();
@@ -67,30 +87,37 @@ pub fn select_seeds(
                 continue;
             }
 
-            match result_map.get(&neighbor) {
-                Some(existing) if existing.score >= fanout_score => {
+            if let Some(existing) = result_map.get(&neighbor) {
+                if existing.score >= fanout_score {
                     // Already has a higher or equal score, skip
+                    continue;
                 }
-                _ => {
-                    // Find token count for the neighbor
-                    let token_count = index
-                        .files
-                        .iter()
-                        .find(|f| f.relative_path == neighbor)
-                        .map(|f| f.token_count)
-                        .unwrap_or(0);
-
-                    result_map.insert(
-                        neighbor.clone(),
-                        ScoredFile {
-                            path: neighbor,
-                            score: fanout_score,
-                            signals: vec![],
-                            token_count,
-                        },
-                    );
+                if !existing.signals.is_empty() {
+                    // Neighbor is a scored seed — upgrade score but preserve signals
+                    let mut upgraded = existing.clone();
+                    upgraded.score = fanout_score;
+                    result_map.insert(neighbor, upgraded);
+                    continue;
                 }
             }
+
+            // New neighbor not yet in results — add with fanout score
+            let token_count = index
+                .files
+                .iter()
+                .find(|f| f.relative_path == neighbor)
+                .map(|f| f.token_count)
+                .unwrap_or(0);
+
+            result_map.insert(
+                neighbor.clone(),
+                ScoredFile {
+                    path: neighbor,
+                    score: fanout_score,
+                    signals: vec![],
+                    token_count,
+                },
+            );
         }
     }
 

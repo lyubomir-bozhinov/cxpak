@@ -3,7 +3,16 @@ set -euo pipefail
 
 # Resolve the cxpak binary using the existing ensure-cxpak script
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CXPAK="$("${SCRIPT_DIR}/ensure-cxpak")"
+CXPAK="$("${SCRIPT_DIR}/ensure-cxpak")" || {
+    echo "cxpak: failed to locate or install the cxpak binary." >&2
+    echo "  Run '${SCRIPT_DIR}/ensure-cxpak' manually to see the full error." >&2
+    exit 1
+}
+
+if [ ! -x "$CXPAK" ]; then
+    echo "cxpak: binary at '$CXPAK' is not executable." >&2
+    exit 1
+fi
 
 # exec replaces this shell process so stdio flows directly
 # between Claude Code and cxpak's MCP server

@@ -7,14 +7,18 @@ use std::collections::HashSet;
 fn tokenize(s: &str) -> HashSet<String> {
     let mut tokens = HashSet::new();
     for word in s.split(|c: char| !c.is_alphanumeric() && c != '_') {
-        let lower = word.to_lowercase();
-        if lower.len() >= 2 {
-            tokens.insert(lower);
-        }
-        for part in crate::index::split_identifier(word) {
-            if part.len() >= 2 {
-                tokens.insert(part);
+        let parts: Vec<String> = crate::index::split_identifier(word)
+            .into_iter()
+            .filter(|p| p.len() >= 2)
+            .collect();
+        if parts.is_empty() {
+            // No split parts — keep the whole word (e.g. "API" -> "api")
+            let lower = word.to_lowercase();
+            if lower.len() >= 2 {
+                tokens.insert(lower);
             }
+        } else {
+            tokens.extend(parts);
         }
     }
     tokens
@@ -158,8 +162,9 @@ pub fn import_proximity(file_path: &str, index: &CodebaseIndex) -> SignalResult 
         .filter(|f| {
             f.parse_result.as_ref().is_some_and(|pr| {
                 pr.imports.iter().any(|imp| {
-                    // Check if import source references this file's path
-                    let source_lower = imp.source.to_lowercase();
+                    // Check if import source references this file's path.
+                    // Split source into segments and match against the file stem
+                    // to avoid false positives (e.g. "config" matching "reconfigure").
                     let path_stem = file_path
                         .rsplit('/')
                         .next()
@@ -168,7 +173,13 @@ pub fn import_proximity(file_path: &str, index: &CodebaseIndex) -> SignalResult 
                         .next()
                         .unwrap_or("")
                         .to_lowercase();
-                    source_lower.contains(&path_stem) && path_stem.len() >= 2
+                    if path_stem.len() < 2 {
+                        return false;
+                    }
+                    let source_lower = imp.source.to_lowercase();
+                    source_lower
+                        .split([':', '/', '.', '\\'])
+                        .any(|segment| segment == path_stem)
                 })
             })
         })

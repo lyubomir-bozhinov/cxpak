@@ -42,11 +42,11 @@ pub struct SignalWeights {
 impl Default for SignalWeights {
     fn default() -> Self {
         Self {
-            path_similarity: 0.20,
-            symbol_match: 0.35,
-            import_proximity: 0.15,
-            term_frequency: 0.20,
-            recency_boost: 0.10,
+            path_similarity: 0.22,
+            symbol_match: 0.38,
+            import_proximity: 0.17,
+            term_frequency: 0.23,
+            recency_boost: 0.0, // no git history in index yet; weight redistributed
         }
     }
 }

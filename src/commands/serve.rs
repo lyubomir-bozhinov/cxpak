@@ -13,7 +13,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -134,7 +134,7 @@ pub fn run(
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
-        let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
         eprintln!("cxpak: listening on http://{addr}");
         let listener = tokio::net::TcpListener::bind(addr).await?;
         axum::serve(listener, app).await?;
@@ -279,11 +279,7 @@ async fn diff_handler(
 
 // --- MCP server mode (JSON-RPC over stdio) ---
 
-pub fn run_mcp(
-    path: &Path,
-    _token_budget: usize,
-    _verbose: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_mcp(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let index = build_index(path)?;
 
     eprintln!(
@@ -294,6 +290,12 @@ pub fn run_mcp(
     mcp_stdio_loop(path, &index)
 }
 
+/// Run the MCP stdio loop.
+///
+/// NOTE: The index is built once at startup and not refreshed during the
+/// session. This is acceptable because MCP connections are typically
+/// short-lived (one task ≈ one connection). If long-lived sessions become
+/// common, consider rebuilding the index periodically.
 fn mcp_stdio_loop(
     repo_path: &Path,
     index: &CodebaseIndex,
@@ -564,14 +566,14 @@ fn handle_tool_call(
 
             let scorer = crate::relevance::MultiSignalScorer::new();
             let all_scored = scorer.score_all(task, index);
-            let seeds = crate::relevance::seed::select_seeds(
+            let graph = crate::index::graph::build_dependency_graph(index);
+            let seeds = crate::relevance::seed::select_seeds_with_graph(
                 &all_scored,
                 index,
                 crate::relevance::seed::SEED_THRESHOLD,
                 limit,
+                Some(&graph),
             );
-
-            let graph = crate::index::graph::build_dependency_graph(index);
             let candidates: Vec<Value> = seeds
                 .iter()
                 .map(|s| {
@@ -588,7 +590,7 @@ fn handle_tool_call(
                         .collect();
                     json!({
                         "path": &s.path,
-                        "score": (s.score * 100.0).round() / 100.0,
+                        "score": (s.score * 10000.0).round() / 10000.0,
                         "signals": signals,
                         "tokens": s.token_count,
                         "dependencies": deps,
@@ -635,7 +637,16 @@ fn handle_tool_call(
                 .and_then(|d| d.as_bool())
                 .unwrap_or(false);
 
+            // Build a lookup map from path -> index position for O(1) access
+            let index_map: HashMap<&str, usize> = index
+                .files
+                .iter()
+                .enumerate()
+                .map(|(i, f)| (f.relative_path.as_str(), i))
+                .collect();
+
             let mut target_files: Vec<(String, &str)> = vec![];
+            let mut seen: HashSet<String> = HashSet::new();
             let graph = if include_deps {
                 Some(crate::index::graph::build_dependency_graph(index))
             } else {
@@ -643,13 +654,13 @@ fn handle_tool_call(
             };
 
             for path in &files {
-                if !target_files.iter().any(|(p, _)| p == path) {
+                if seen.insert(path.clone()) {
                     target_files.push((path.clone(), "selected"));
                 }
                 if let Some(ref g) = graph {
                     if let Some(deps) = g.dependencies(path) {
                         for dep in deps {
-                            if !target_files.iter().any(|(p, _)| p == dep) {
+                            if seen.insert(dep.clone()) {
                                 target_files.push((dep.clone(), "dependency"));
                             }
                         }
@@ -659,24 +670,31 @@ fn handle_tool_call(
 
             let mut packed = vec![];
             let mut omitted = vec![];
+            let mut not_found = vec![];
             let mut total_tokens = 0usize;
 
             for (path, included_as) in &target_files {
-                if let Some(file) = index.files.iter().find(|f| f.relative_path == *path) {
-                    if total_tokens + file.token_count <= token_budget {
-                        packed.push(json!({
-                            "path": path,
-                            "tokens": file.token_count,
-                            "content": file.content,
-                            "included_as": included_as,
-                        }));
-                        total_tokens += file.token_count;
-                    } else {
-                        omitted.push(json!({
-                            "path": path,
-                            "tokens": file.token_count,
-                            "reason": "budget exceeded",
-                        }));
+                match index_map.get(path.as_str()) {
+                    Some(&idx) => {
+                        let file = &index.files[idx];
+                        if total_tokens + file.token_count <= token_budget {
+                            packed.push(json!({
+                                "path": path,
+                                "tokens": file.token_count,
+                                "content": file.content,
+                                "included_as": included_as,
+                            }));
+                            total_tokens += file.token_count;
+                        } else {
+                            omitted.push(json!({
+                                "path": path,
+                                "tokens": file.token_count,
+                                "reason": "budget exceeded",
+                            }));
+                        }
+                    }
+                    None => {
+                        not_found.push(json!({ "path": path }));
                     }
                 }
             }
@@ -689,6 +707,7 @@ fn handle_tool_call(
                     "budget": token_budget,
                     "files": packed,
                     "omitted": omitted,
+                    "not_found": not_found,
                 }))
                 .unwrap_or_default(),
             )
