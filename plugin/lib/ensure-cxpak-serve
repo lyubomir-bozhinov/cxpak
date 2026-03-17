@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve the cxpak binary using the existing ensure-cxpak script
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CXPAK="$("${SCRIPT_DIR}/ensure-cxpak")"
+
+# exec replaces this shell process so stdio flows directly
+# between Claude Code and cxpak's MCP server
+exec "$CXPAK" serve --mcp

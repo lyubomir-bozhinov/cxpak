@@ -1,0 +1,7 @@
+{
+  "cxpak": {
+    "command": "${CLAUDE_PLUGIN_ROOT}/lib/ensure-cxpak-serve",
+    "args": [],
+    "env": {}
+  }
+}
