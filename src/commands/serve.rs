@@ -1821,4 +1821,63 @@ mod tests {
         let content = response["result"]["content"][0]["text"].as_str().unwrap();
         assert!(content.contains("Error") || content.contains("error"));
     }
+
+    // --- Two-phase handshake integration test ---
+
+    #[test]
+    fn test_mcp_two_phase_handshake() {
+        // Simulates: context_for_task → review candidates → pack_context
+        let index = make_test_index();
+        let repo_path = std::path::Path::new("/tmp");
+
+        // Phase 1: Get candidates
+        let request1 = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cxpak_context_for_task","arguments":{"task":"main function"}}}"#;
+        let input1 = format!("{request1}\n");
+        let mut output1 = Vec::new();
+        mcp_stdio_loop_with_io(repo_path, &index, input1.as_bytes(), &mut output1).unwrap();
+        let response1: Value = serde_json::from_slice(&output1).unwrap();
+        let content1 = response1["result"]["content"][0]["text"].as_str().unwrap();
+        let result1: Value = serde_json::from_str(content1).unwrap();
+
+        // Extract candidate paths (simulating Claude reviewing and selecting)
+        let candidates = result1["candidates"].as_array().unwrap();
+        assert!(!candidates.is_empty(), "should have candidates");
+        let selected_paths: Vec<String> = candidates
+            .iter()
+            .take(2)
+            .map(|c| c["path"].as_str().unwrap().to_string())
+            .collect();
+
+        // Phase 2: Pack selected files
+        let request2 = format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{{"name":"cxpak_pack_context","arguments":{{"files":{},"tokens":"50k","include_dependencies":true}}}}}}"#,
+            serde_json::to_string(&selected_paths).unwrap()
+        );
+        let input2 = format!("{request2}\n");
+        let mut output2 = Vec::new();
+        mcp_stdio_loop_with_io(repo_path, &index, input2.as_bytes(), &mut output2).unwrap();
+        let response2: Value = serde_json::from_slice(&output2).unwrap();
+        let content2 = response2["result"]["content"][0]["text"].as_str().unwrap();
+        let result2: Value = serde_json::from_str(content2).unwrap();
+
+        assert!(result2["packed_files"].as_u64().unwrap() > 0);
+        let packed_files = result2["files"].as_array().unwrap();
+        // All selected files should be in the pack
+        for path in &selected_paths {
+            assert!(
+                packed_files
+                    .iter()
+                    .any(|f| f["path"].as_str().unwrap() == path),
+                "selected file {} should be in pack",
+                path
+            );
+        }
+        // Content should be present
+        for file in packed_files {
+            assert!(
+                !file["content"].as_str().unwrap().is_empty(),
+                "packed file should have content"
+            );
+        }
+    }
 }
