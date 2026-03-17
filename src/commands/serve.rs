@@ -607,6 +607,92 @@ fn handle_tool_call(
                 .unwrap_or_default(),
             )
         }
+        "cxpak_pack_context" => {
+            let files: Vec<String> = args
+                .get("files")
+                .and_then(|f| f.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            if files.is_empty() {
+                return mcp_tool_result(
+                    id,
+                    "Error: 'files' argument is required and must not be empty",
+                );
+            }
+
+            let token_budget = args
+                .get("tokens")
+                .and_then(|t| t.as_str())
+                .and_then(|t| crate::cli::parse_token_count(t).ok())
+                .unwrap_or(50_000);
+            let include_deps = args
+                .get("include_dependencies")
+                .and_then(|d| d.as_bool())
+                .unwrap_or(false);
+
+            let mut target_files: Vec<(String, &str)> = vec![];
+            let graph = if include_deps {
+                Some(crate::index::graph::build_dependency_graph(index))
+            } else {
+                None
+            };
+
+            for path in &files {
+                if !target_files.iter().any(|(p, _)| p == path) {
+                    target_files.push((path.clone(), "selected"));
+                }
+                if let Some(ref g) = graph {
+                    if let Some(deps) = g.dependencies(path) {
+                        for dep in deps {
+                            if !target_files.iter().any(|(p, _)| p == dep) {
+                                target_files.push((dep.clone(), "dependency"));
+                            }
+                        }
+                    }
+                }
+            }
+
+            let mut packed = vec![];
+            let mut omitted = vec![];
+            let mut total_tokens = 0usize;
+
+            for (path, included_as) in &target_files {
+                if let Some(file) = index.files.iter().find(|f| f.relative_path == *path) {
+                    if total_tokens + file.token_count <= token_budget {
+                        packed.push(json!({
+                            "path": path,
+                            "tokens": file.token_count,
+                            "content": file.content,
+                            "included_as": included_as,
+                        }));
+                        total_tokens += file.token_count;
+                    } else {
+                        omitted.push(json!({
+                            "path": path,
+                            "tokens": file.token_count,
+                            "reason": "budget exceeded",
+                        }));
+                    }
+                }
+            }
+
+            mcp_tool_result(
+                id,
+                &serde_json::to_string_pretty(&json!({
+                    "packed_files": packed.len(),
+                    "total_tokens": total_tokens,
+                    "budget": token_budget,
+                    "files": packed,
+                    "omitted": omitted,
+                }))
+                .unwrap_or_default(),
+            )
+        }
         _ => mcp_response(
             id,
             json!({
@@ -1657,5 +1743,82 @@ mod tests {
         let content = response["result"]["content"][0]["text"].as_str().unwrap();
         let result: Value = serde_json::from_str(content).unwrap();
         assert!(result["candidates"].as_array().unwrap().len() <= 15); // default limit
+    }
+
+    // --- cxpak_pack_context MCP tool ---
+
+    #[test]
+    fn test_mcp_pack_context_happy_path() {
+        let index = make_test_index();
+        let repo_path = std::path::Path::new("/tmp");
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cxpak_pack_context","arguments":{"files":["src/main.rs","src/lib.rs"],"tokens":"50k"}}}"#;
+        let input = format!("{request}\n");
+        let mut output = Vec::new();
+        mcp_stdio_loop_with_io(repo_path, &index, input.as_bytes(), &mut output).unwrap();
+        let response: Value = serde_json::from_slice(&output).unwrap();
+        let content = response["result"]["content"][0]["text"].as_str().unwrap();
+        let result: Value = serde_json::from_str(content).unwrap();
+        assert!(result["packed_files"].as_u64().unwrap() > 0);
+        assert!(result["total_tokens"].as_u64().unwrap() > 0);
+        let files = result["files"].as_array().unwrap();
+        assert!(files.iter().any(|f| f["path"] == "src/main.rs"));
+    }
+
+    #[test]
+    fn test_mcp_pack_context_with_dependencies() {
+        let index = make_test_index();
+        let repo_path = std::path::Path::new("/tmp");
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cxpak_pack_context","arguments":{"files":["src/main.rs"],"tokens":"50k","include_dependencies":true}}}"#;
+        let input = format!("{request}\n");
+        let mut output = Vec::new();
+        mcp_stdio_loop_with_io(repo_path, &index, input.as_bytes(), &mut output).unwrap();
+        let response: Value = serde_json::from_slice(&output).unwrap();
+        let content = response["result"]["content"][0]["text"].as_str().unwrap();
+        let result: Value = serde_json::from_str(content).unwrap();
+        assert!(result["packed_files"].as_u64().unwrap() >= 1);
+    }
+
+    #[test]
+    fn test_mcp_pack_context_budget_overflow() {
+        let index = make_test_index();
+        let repo_path = std::path::Path::new("/tmp");
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cxpak_pack_context","arguments":{"files":["src/main.rs","src/lib.rs"],"tokens":"1"}}}"#;
+        let input = format!("{request}\n");
+        let mut output = Vec::new();
+        mcp_stdio_loop_with_io(repo_path, &index, input.as_bytes(), &mut output).unwrap();
+        let response: Value = serde_json::from_slice(&output).unwrap();
+        let content = response["result"]["content"][0]["text"].as_str().unwrap();
+        let result: Value = serde_json::from_str(content).unwrap();
+        assert!(
+            result["omitted"].as_array().is_some_and(|a| !a.is_empty())
+                || result["packed_files"].as_u64().unwrap() == 0
+        );
+    }
+
+    #[test]
+    fn test_mcp_pack_context_missing_files() {
+        let index = make_test_index();
+        let repo_path = std::path::Path::new("/tmp");
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cxpak_pack_context","arguments":{"files":["nonexistent.rs"],"tokens":"50k"}}}"#;
+        let input = format!("{request}\n");
+        let mut output = Vec::new();
+        mcp_stdio_loop_with_io(repo_path, &index, input.as_bytes(), &mut output).unwrap();
+        let response: Value = serde_json::from_slice(&output).unwrap();
+        let content = response["result"]["content"][0]["text"].as_str().unwrap();
+        let result: Value = serde_json::from_str(content).unwrap();
+        assert_eq!(result["packed_files"].as_u64().unwrap(), 0);
+    }
+
+    #[test]
+    fn test_mcp_pack_context_empty_files_list() {
+        let index = make_test_index();
+        let repo_path = std::path::Path::new("/tmp");
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cxpak_pack_context","arguments":{"files":[],"tokens":"50k"}}}"#;
+        let input = format!("{request}\n");
+        let mut output = Vec::new();
+        mcp_stdio_loop_with_io(repo_path, &index, input.as_bytes(), &mut output).unwrap();
+        let response: Value = serde_json::from_slice(&output).unwrap();
+        let content = response["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(content.contains("Error") || content.contains("error"));
     }
 }
