@@ -400,6 +400,31 @@ fn mcp_stdio_loop_with_io(
                                 "type": "object",
                                 "properties": {}
                             }
+                        },
+                        {
+                            "name": "cxpak_context_for_task",
+                            "description": "Score and rank codebase files by relevance to a task description",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "task": { "type": "string", "description": "Natural language task description" },
+                                    "limit": { "type": "number", "description": "Maximum number of candidates to return (default 15)" }
+                                },
+                                "required": ["task"]
+                            }
+                        },
+                        {
+                            "name": "cxpak_pack_context",
+                            "description": "Pack selected files into a token-budgeted context bundle with dependency context",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "files": { "type": "array", "items": { "type": "string" }, "description": "File paths to include" },
+                                    "tokens": { "type": "string", "description": "Token budget (e.g. '30k', '50k')", "default": "50k" },
+                                    "include_dependencies": { "type": "boolean", "description": "Include 1-hop dependencies", "default": false }
+                                },
+                                "required": ["files"]
+                            }
                         }
                     ]
                 }),
@@ -526,6 +551,61 @@ fn handle_tool_call(
                 }
                 Err(e) => mcp_tool_result(id, &format!("Error: {e}")),
             }
+        }
+        "cxpak_context_for_task" => {
+            let task = args.get("task").and_then(|t| t.as_str()).unwrap_or("");
+            if task.is_empty() {
+                return mcp_tool_result(
+                    id,
+                    "Error: 'task' argument is required and must not be empty",
+                );
+            }
+            let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(15) as usize;
+
+            let scorer = crate::relevance::MultiSignalScorer::new();
+            let all_scored = scorer.score_all(task, index);
+            let seeds = crate::relevance::seed::select_seeds(
+                &all_scored,
+                index,
+                crate::relevance::seed::SEED_THRESHOLD,
+                limit,
+            );
+
+            let graph = crate::index::graph::build_dependency_graph(index);
+            let candidates: Vec<Value> = seeds
+                .iter()
+                .map(|s| {
+                    let deps: Vec<&str> = graph
+                        .dependencies(&s.path)
+                        .map(|d| d.iter().map(String::as_str).collect())
+                        .unwrap_or_default();
+                    let signals: Vec<Value> = s
+                        .signals
+                        .iter()
+                        .map(|sig| {
+                            json!({"name": sig.name, "score": sig.score, "detail": &sig.detail})
+                        })
+                        .collect();
+                    json!({
+                        "path": &s.path,
+                        "score": (s.score * 100.0).round() / 100.0,
+                        "signals": signals,
+                        "tokens": s.token_count,
+                        "dependencies": deps,
+                    })
+                })
+                .collect();
+
+            mcp_tool_result(
+                id,
+                &serde_json::to_string_pretty(&json!({
+                    "task": task,
+                    "candidates": candidates,
+                    "total_files_scored": all_scored.len(),
+                    "hint": "Review candidates and call cxpak_pack_context with selected paths, or use these as-is."
+                }))
+                .unwrap_or_default(),
+            )
         }
         _ => mcp_response(
             id,
@@ -980,7 +1060,7 @@ mod tests {
         let line = String::from_utf8(output).unwrap();
         let resp: Value = serde_json::from_str(line.trim()).unwrap();
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 6);
     }
 
     #[test]
@@ -1516,5 +1596,66 @@ mod tests {
         };
         let result = rt.block_on(overview_handler(State(shared), Query(params)));
         assert!(result.is_err());
+    }
+
+    // --- cxpak_context_for_task MCP tool ---
+
+    #[test]
+    fn test_mcp_tools_list_includes_new_tools() {
+        let index = make_test_index();
+        let repo_path = std::path::Path::new("/tmp");
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
+        let input = format!("{request}\n");
+        let mut output = Vec::new();
+        mcp_stdio_loop_with_io(repo_path, &index, input.as_bytes(), &mut output).unwrap();
+        let response: Value = serde_json::from_slice(&output).unwrap();
+        let tools = response["result"]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 6, "should have 6 tools (4 existing + 2 new)");
+        let tool_names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert!(tool_names.contains(&"cxpak_context_for_task"));
+        assert!(tool_names.contains(&"cxpak_pack_context"));
+    }
+
+    #[test]
+    fn test_mcp_context_for_task_happy_path() {
+        let index = make_test_index();
+        let repo_path = std::path::Path::new("/tmp");
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cxpak_context_for_task","arguments":{"task":"main function","limit":5}}}"#;
+        let input = format!("{request}\n");
+        let mut output = Vec::new();
+        mcp_stdio_loop_with_io(repo_path, &index, input.as_bytes(), &mut output).unwrap();
+        let response: Value = serde_json::from_slice(&output).unwrap();
+        let content = response["result"]["content"][0]["text"].as_str().unwrap();
+        let result: Value = serde_json::from_str(content).unwrap();
+        assert_eq!(result["task"], "main function");
+        assert!(!result["candidates"].as_array().unwrap().is_empty());
+        assert!(result["total_files_scored"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
+    fn test_mcp_context_for_task_empty_query() {
+        let index = make_test_index();
+        let repo_path = std::path::Path::new("/tmp");
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cxpak_context_for_task","arguments":{"task":""}}}"#;
+        let input = format!("{request}\n");
+        let mut output = Vec::new();
+        mcp_stdio_loop_with_io(repo_path, &index, input.as_bytes(), &mut output).unwrap();
+        let response: Value = serde_json::from_slice(&output).unwrap();
+        let content = response["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(content.contains("Error") || content.contains("error"));
+    }
+
+    #[test]
+    fn test_mcp_context_for_task_default_limit() {
+        let index = make_test_index();
+        let repo_path = std::path::Path::new("/tmp");
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cxpak_context_for_task","arguments":{"task":"hello"}}}"#;
+        let input = format!("{request}\n");
+        let mut output = Vec::new();
+        mcp_stdio_loop_with_io(repo_path, &index, input.as_bytes(), &mut output).unwrap();
+        let response: Value = serde_json::from_slice(&output).unwrap();
+        let content = response["result"]["content"][0]["text"].as_str().unwrap();
+        let result: Value = serde_json::from_str(content).unwrap();
+        assert!(result["candidates"].as_array().unwrap().len() <= 15); // default limit
     }
 }

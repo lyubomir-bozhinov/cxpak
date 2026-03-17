@@ -473,13 +473,15 @@ mod serve_tests {
 
         assert_eq!(response["id"], 2);
         let tools = response["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 6);
 
         let tool_names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(tool_names.contains(&"cxpak_overview"));
         assert!(tool_names.contains(&"cxpak_trace"));
         assert!(tool_names.contains(&"cxpak_stats"));
         assert!(tool_names.contains(&"cxpak_diff"));
+        assert!(tool_names.contains(&"cxpak_context_for_task"));
+        assert!(tool_names.contains(&"cxpak_pack_context"));
 
         child.kill().ok();
         child.wait().ok();
