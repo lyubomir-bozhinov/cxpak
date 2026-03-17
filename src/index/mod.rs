@@ -14,6 +14,7 @@ pub struct CodebaseIndex {
     pub total_files: usize,
     pub total_bytes: u64,
     pub total_tokens: usize,
+    pub term_frequencies: HashMap<String, HashMap<String, u32>>,
 }
 
 #[derive(Debug)]
@@ -33,6 +34,46 @@ pub struct LanguageStats {
     pub total_tokens: usize,
 }
 
+fn compute_term_frequencies(content: &str) -> HashMap<String, u32> {
+    let mut counts: HashMap<String, u32> = HashMap::new();
+    for word in content.split(|c: char| !c.is_alphanumeric() && c != '_') {
+        let lower = word.to_lowercase();
+        if lower.len() < 2 {
+            continue;
+        }
+        for part in split_identifier(&lower) {
+            if part.len() >= 2 {
+                *counts.entry(part).or_insert(0) += 1;
+            }
+        }
+    }
+    counts
+}
+
+fn split_identifier(s: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    for segment in s.split('_') {
+        if segment.is_empty() {
+            continue;
+        }
+        let mut current = String::new();
+        let chars: Vec<char> = segment.chars().collect();
+        for (i, &ch) in chars.iter().enumerate() {
+            if i > 0 && ch.is_uppercase() {
+                if !current.is_empty() {
+                    parts.push(current.to_lowercase());
+                }
+                current = String::new();
+            }
+            current.push(ch);
+        }
+        if !current.is_empty() {
+            parts.push(current.to_lowercase());
+        }
+    }
+    parts
+}
+
 impl CodebaseIndex {
     pub fn build(
         files: Vec<ScannedFile>,
@@ -43,6 +84,7 @@ impl CodebaseIndex {
         let mut indexed_files = Vec::new();
         let mut total_tokens = 0usize;
         let mut total_bytes = 0u64;
+        let mut term_frequencies = HashMap::new();
 
         for file in &files {
             let content = std::fs::read_to_string(&file.absolute_path).unwrap_or_default();
@@ -61,6 +103,11 @@ impl CodebaseIndex {
                 stats.total_tokens += token_count;
             }
 
+            term_frequencies.insert(
+                file.relative_path.clone(),
+                compute_term_frequencies(&content),
+            );
+
             let parse_result = parse_results.get(&file.relative_path).cloned();
             indexed_files.push(IndexedFile {
                 relative_path: file.relative_path.clone(),
@@ -78,6 +125,7 @@ impl CodebaseIndex {
             total_tokens,
             files: indexed_files,
             language_stats,
+            term_frequencies,
         }
     }
 
@@ -157,6 +205,7 @@ impl CodebaseIndex {
         let mut indexed_files = Vec::new();
         let mut total_tokens = 0usize;
         let mut total_bytes = 0u64;
+        let mut term_frequencies = HashMap::new();
 
         for file in &files {
             let file_content = content
@@ -180,6 +229,11 @@ impl CodebaseIndex {
                 stats.total_tokens += token_count;
             }
 
+            term_frequencies.insert(
+                file.relative_path.clone(),
+                compute_term_frequencies(&file_content),
+            );
+
             let parse_result = parse_results.get(&file.relative_path).cloned();
             indexed_files.push(IndexedFile {
                 relative_path: file.relative_path.clone(),
@@ -197,6 +251,7 @@ impl CodebaseIndex {
             total_tokens,
             files: indexed_files,
             language_stats,
+            term_frequencies,
         }
     }
 
@@ -245,6 +300,8 @@ impl CodebaseIndex {
         });
 
         self.total_files = self.files.len();
+        self.term_frequencies
+            .insert(relative_path.to_string(), compute_term_frequencies(content));
     }
 
     /// Remove a file from the index by relative path.
@@ -272,6 +329,7 @@ impl CodebaseIndex {
             }
 
             self.total_files = self.files.len();
+            self.term_frequencies.remove(relative_path);
         }
     }
 
@@ -628,6 +686,108 @@ mod tests {
         assert_eq!(index.files.len(), 1);
         assert_eq!(index.total_tokens, orig_tokens);
         assert_eq!(index.total_bytes, orig_bytes);
+    }
+
+    #[test]
+    fn test_term_frequencies_built_during_index() {
+        let counter = TokenCounter::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let fp = dir.path().join("api.rs");
+        std::fs::write(&fp, "fn handle_request() { let rate = get_rate_limit(); }").unwrap();
+        let files = vec![ScannedFile {
+            relative_path: "api.rs".into(),
+            absolute_path: fp,
+            language: Some("rust".into()),
+            size_bytes: 55,
+        }];
+        let index = CodebaseIndex::build(files, HashMap::new(), &counter);
+        let tf = index
+            .term_frequencies
+            .get("api.rs")
+            .expect("should have tf for api.rs");
+        assert!(tf.get("handle").unwrap_or(&0) > &0);
+        assert!(tf.get("request").unwrap_or(&0) > &0);
+        assert!(tf.get("rate").unwrap_or(&0) > &0);
+    }
+
+    #[test]
+    fn test_term_frequencies_empty_file() {
+        let counter = TokenCounter::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let fp = dir.path().join("empty.rs");
+        std::fs::write(&fp, "").unwrap();
+        let files = vec![ScannedFile {
+            relative_path: "empty.rs".into(),
+            absolute_path: fp,
+            language: Some("rust".into()),
+            size_bytes: 0,
+        }];
+        let index = CodebaseIndex::build(files, HashMap::new(), &counter);
+        let tf = index
+            .term_frequencies
+            .get("empty.rs")
+            .expect("should have tf entry");
+        assert!(tf.is_empty());
+    }
+
+    #[test]
+    fn test_term_frequencies_with_build_with_content() {
+        let counter = TokenCounter::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let fp = dir.path().join("test.rs");
+        std::fs::write(&fp, "").unwrap();
+        let files = vec![ScannedFile {
+            relative_path: "test.rs".into(),
+            absolute_path: fp,
+            language: Some("rust".into()),
+            size_bytes: 30,
+        }];
+        let mut content_map = HashMap::new();
+        content_map.insert(
+            "test.rs".to_string(),
+            "fn hello_world() { hello(); world(); }".to_string(),
+        );
+        let index = CodebaseIndex::build_with_content(files, HashMap::new(), &counter, content_map);
+        let tf = index.term_frequencies.get("test.rs").unwrap();
+        assert_eq!(*tf.get("hello").unwrap_or(&0), 2);
+        assert_eq!(*tf.get("world").unwrap_or(&0), 2);
+    }
+
+    #[test]
+    fn test_term_frequencies_updated_on_upsert() {
+        let counter = TokenCounter::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let fp = dir.path().join("a.rs");
+        std::fs::write(&fp, "fn old() {}").unwrap();
+        let files = vec![ScannedFile {
+            relative_path: "a.rs".into(),
+            absolute_path: fp,
+            language: Some("rust".into()),
+            size_bytes: 11,
+        }];
+        let mut index = CodebaseIndex::build(files, HashMap::new(), &counter);
+        assert!(index.term_frequencies["a.rs"].contains_key("old"));
+        index.upsert_file("a.rs", Some("rust"), "fn new_func() {}", None, &counter);
+        assert!(!index.term_frequencies["a.rs"].contains_key("old"));
+        assert!(index.term_frequencies["a.rs"].contains_key("new"));
+    }
+
+    #[test]
+    fn test_term_frequencies_cleaned_on_remove() {
+        let counter = TokenCounter::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let fp = dir.path().join("a.rs");
+        std::fs::write(&fp, "fn test() {}").unwrap();
+        let files = vec![ScannedFile {
+            relative_path: "a.rs".into(),
+            absolute_path: fp,
+            language: Some("rust".into()),
+            size_bytes: 12,
+        }];
+        let mut index = CodebaseIndex::build(files, HashMap::new(), &counter);
+        assert!(index.term_frequencies.contains_key("a.rs"));
+        index.remove_file("a.rs");
+        assert!(!index.term_frequencies.contains_key("a.rs"));
     }
 
     /// This test is intentionally FAILING until Task 4 implements `build_with_content`
