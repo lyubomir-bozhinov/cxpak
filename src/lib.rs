@@ -7,4 +7,5 @@ pub mod git;
 pub mod index;
 pub mod output;
 pub mod parser;
+pub mod relevance;
 pub mod scanner;
