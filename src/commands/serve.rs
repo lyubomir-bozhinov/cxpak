@@ -1841,6 +1841,42 @@ mod tests {
         assert!(content.contains("Error") || content.contains("error"));
     }
 
+    #[test]
+    fn test_mcp_pack_context_invalid_token_budget_defaults() {
+        // Invalid token string "xyz" should fall back to 50k default
+        let index = make_test_index();
+        let repo_path = std::path::Path::new("/tmp");
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cxpak_pack_context","arguments":{"files":["src/main.rs"],"tokens":"xyz"}}}"#;
+        let input = format!("{request}\n");
+        let mut output = Vec::new();
+        mcp_stdio_loop_with_io(repo_path, &index, input.as_bytes(), &mut output).unwrap();
+        let response: Value = serde_json::from_slice(&output).unwrap();
+        let content = response["result"]["content"][0]["text"].as_str().unwrap();
+        let result: Value = serde_json::from_str(content).unwrap();
+        // Should succeed (not error) with the default 50k budget
+        assert_eq!(result["budget"].as_u64().unwrap(), 50_000);
+        assert!(result["packed_files"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
+    fn test_mcp_pack_context_duplicate_files_deduped() {
+        let index = make_test_index();
+        let repo_path = std::path::Path::new("/tmp");
+        // Same file listed twice — should only appear once in output
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cxpak_pack_context","arguments":{"files":["src/main.rs","src/main.rs"],"tokens":"50k"}}}"#;
+        let input = format!("{request}\n");
+        let mut output = Vec::new();
+        mcp_stdio_loop_with_io(repo_path, &index, input.as_bytes(), &mut output).unwrap();
+        let response: Value = serde_json::from_slice(&output).unwrap();
+        let content = response["result"]["content"][0]["text"].as_str().unwrap();
+        let result: Value = serde_json::from_str(content).unwrap();
+        assert_eq!(
+            result["packed_files"].as_u64().unwrap(),
+            1,
+            "duplicate file should be deduped to 1"
+        );
+    }
+
     // --- Two-phase handshake integration test ---
 
     #[test]

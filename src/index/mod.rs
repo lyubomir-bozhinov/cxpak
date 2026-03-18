@@ -821,6 +821,59 @@ mod tests {
         );
     }
 
+    // --- split_identifier edge cases ---
+
+    #[test]
+    fn test_split_identifier_snake_case() {
+        let parts = split_identifier("rate_limit_check");
+        assert_eq!(parts, vec!["rate", "limit", "check"]);
+    }
+
+    #[test]
+    fn test_split_identifier_single_char_segments() {
+        // Single-char segments are kept by split_identifier itself;
+        // callers (compute_term_frequencies, tokenize) filter len < 2.
+        let parts = split_identifier("a_b_cd");
+        assert_eq!(parts, vec!["a", "b", "cd"]);
+    }
+
+    #[test]
+    fn test_split_identifier_all_caps() {
+        let parts = split_identifier("API");
+        // Each uppercase letter is a camelCase boundary, so A|P|I → ["a","p","i"]
+        assert_eq!(parts, vec!["a", "p", "i"]);
+    }
+
+    #[test]
+    fn test_split_identifier_mixed_caps_and_numbers() {
+        let parts = split_identifier("handle2Request");
+        // "handle2" stays together (no uppercase boundary), then "Request" splits
+        assert_eq!(parts, vec!["handle2", "request"]);
+    }
+
+    #[test]
+    fn test_split_identifier_empty_string() {
+        let parts = split_identifier("");
+        assert!(parts.is_empty());
+    }
+
+    #[test]
+    fn test_split_identifier_leading_underscores() {
+        let parts = split_identifier("__private_field");
+        assert_eq!(parts, vec!["private", "field"]);
+    }
+
+    #[test]
+    fn test_compute_term_frequencies_filters_short_parts() {
+        // "a_b" splits into ["a", "b"], both len=1, so neither should appear
+        let freqs = compute_term_frequencies("a_b x_y");
+        assert!(
+            freqs.is_empty(),
+            "single-char parts should be filtered: {:?}",
+            freqs
+        );
+    }
+
     /// This test is intentionally FAILING until Task 4 implements `build_with_content`
     /// properly.  The stub ignores the content map and falls back to `build()`, which
     /// reads the file from disk.  Once the real implementation is in place the content

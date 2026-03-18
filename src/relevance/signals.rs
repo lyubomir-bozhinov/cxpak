@@ -525,4 +525,148 @@ mod tests {
         let result = term_frequency("test", "nonexistent.rs", &index);
         assert_eq!(result.score, 0.0);
     }
+
+    // --- tokenize() edge cases ---
+
+    #[test]
+    fn test_tokenize_empty_string() {
+        let tokens = tokenize("");
+        assert!(tokens.is_empty(), "empty input should produce no tokens");
+    }
+
+    #[test]
+    fn test_tokenize_single_char_dropped() {
+        let tokens = tokenize("a b c");
+        assert!(
+            tokens.is_empty(),
+            "single-char words should be filtered out: {:?}",
+            tokens
+        );
+    }
+
+    #[test]
+    fn test_tokenize_snake_case() {
+        let tokens = tokenize("rate_limit");
+        assert!(
+            tokens.contains("rate"),
+            "should split snake_case: {:?}",
+            tokens
+        );
+        assert!(
+            tokens.contains("limit"),
+            "should split snake_case: {:?}",
+            tokens
+        );
+    }
+
+    #[test]
+    fn test_tokenize_camel_case() {
+        let tokens = tokenize("handleRequest");
+        assert!(
+            tokens.contains("handle"),
+            "should split camelCase: {:?}",
+            tokens
+        );
+        assert!(
+            tokens.contains("request"),
+            "should split camelCase: {:?}",
+            tokens
+        );
+    }
+
+    #[test]
+    fn test_tokenize_all_caps_kept_whole() {
+        // "API" has no camelCase split → parts is empty → kept as "api"
+        let tokens = tokenize("API");
+        assert!(
+            tokens.contains("api"),
+            "all-caps word should be lowered and kept: {:?}",
+            tokens
+        );
+    }
+
+    #[test]
+    fn test_tokenize_mixed_separators() {
+        let tokens = tokenize("fix the auth/login bug");
+        assert!(tokens.contains("fix"));
+        assert!(tokens.contains("the"));
+        assert!(tokens.contains("auth"));
+        assert!(tokens.contains("login"));
+        assert!(tokens.contains("bug"));
+    }
+
+    #[test]
+    fn test_tokenize_special_chars_only() {
+        let tokens = tokenize("!@#$%");
+        assert!(
+            tokens.is_empty(),
+            "punctuation-only should produce no tokens: {:?}",
+            tokens
+        );
+    }
+
+    // --- import_proximity segment matching ---
+
+    #[test]
+    fn test_import_proximity_segment_match() {
+        // Test that import source "crate::middleware" matches file "middleware.rs"
+        // by segment, not substring.
+        let counter = TokenCounter::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let fp1 = dir.path().join("api.rs");
+        let fp2 = dir.path().join("middleware.rs");
+        let fp3 = dir.path().join("ware.rs"); // should NOT match "middleware"
+        std::fs::write(&fp1, "use middleware;").unwrap();
+        std::fs::write(&fp2, "pub fn mw() {}").unwrap();
+        std::fs::write(&fp3, "pub fn ware() {}").unwrap();
+        let files = vec![
+            ScannedFile {
+                relative_path: "api.rs".into(),
+                absolute_path: fp1,
+                language: Some("rust".into()),
+                size_bytes: 15,
+            },
+            ScannedFile {
+                relative_path: "middleware.rs".into(),
+                absolute_path: fp2,
+                language: Some("rust".into()),
+                size_bytes: 15,
+            },
+            ScannedFile {
+                relative_path: "ware.rs".into(),
+                absolute_path: fp3,
+                language: Some("rust".into()),
+                size_bytes: 15,
+            },
+        ];
+        let mut pr = HashMap::new();
+        pr.insert(
+            "api.rs".to_string(),
+            ParseResult {
+                symbols: vec![],
+                imports: vec![Import {
+                    source: "crate::middleware".into(),
+                    names: vec!["middleware".into()],
+                }],
+                exports: vec![],
+            },
+        );
+        let index = CodebaseIndex::build(files, pr, &counter);
+
+        // middleware.rs should match (segment "middleware" == path stem "middleware")
+        let result_mw = import_proximity("middleware.rs", &index);
+        assert!(
+            result_mw.score > 0.5,
+            "middleware.rs should match via segment: {}",
+            result_mw.score
+        );
+
+        // ware.rs should NOT match (no segment equals "ware")
+        let result_ware = import_proximity("ware.rs", &index);
+        assert!(
+            result_ware.score <= 0.5,
+            "ware.rs should not match 'middleware' by substring: {}",
+            result_ware.score
+        );
+    }
 }
