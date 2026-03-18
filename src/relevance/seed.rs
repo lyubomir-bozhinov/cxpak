@@ -4,7 +4,9 @@ use crate::index::CodebaseIndex;
 use std::collections::HashMap;
 
 /// Default score threshold for seed selection.
-pub const SEED_THRESHOLD: f64 = 0.3;
+/// Kept low (0.10) because the weighted signal sum rarely exceeds 0.3
+/// for natural-language queries with filler words ("fix", "add", "the").
+pub const SEED_THRESHOLD: f64 = 0.10;
 
 /// Discount factor for dependency fan-out scores.
 pub const FANOUT_DISCOUNT: f64 = 0.7;
@@ -256,7 +258,7 @@ mod tests {
             },
             ScoredFile {
                 path: "src/utils.rs".into(),
-                score: 0.1,
+                score: 0.05,
                 signals: vec![],
                 token_count: 10,
             },
@@ -265,8 +267,8 @@ mod tests {
         let paths: Vec<&str> = seeds.iter().map(|s| s.path.as_str()).collect();
         assert!(paths.contains(&"src/api.rs"));
         assert!(paths.contains(&"src/middleware.rs"));
-        // config.rs below threshold (0.2 < 0.3), but may appear as dependency fan-out
-        assert!(!paths.contains(&"src/utils.rs")); // too low, not a dependency
+        assert!(paths.contains(&"src/config.rs")); // 0.2 >= 0.10 threshold
+        assert!(!paths.contains(&"src/utils.rs")); // 0.05 < 0.10 threshold
     }
 
     #[test]
@@ -281,19 +283,19 @@ mod tests {
             },
             ScoredFile {
                 path: "src/middleware.rs".into(),
-                score: 0.1,
+                score: 0.05,
                 signals: vec![],
                 token_count: 10,
             },
             ScoredFile {
                 path: "src/config.rs".into(),
-                score: 0.1,
+                score: 0.05,
                 signals: vec![],
                 token_count: 10,
             },
             ScoredFile {
                 path: "src/utils.rs".into(),
-                score: 0.1,
+                score: 0.05,
                 signals: vec![],
                 token_count: 10,
             },
@@ -359,13 +361,13 @@ mod tests {
         let scored = vec![
             ScoredFile {
                 path: "src/api.rs".into(),
-                score: 0.1,
+                score: 0.05,
                 signals: vec![],
                 token_count: 10,
             },
             ScoredFile {
                 path: "src/utils.rs".into(),
-                score: 0.05,
+                score: 0.02,
                 signals: vec![],
                 token_count: 10,
             },
@@ -446,7 +448,7 @@ mod tests {
         let scored = vec![
             ScoredFile {
                 path: "src/api.rs".into(),
-                score: 0.1,
+                score: 0.05,
                 signals: vec![],
                 token_count: 10,
             },
@@ -458,13 +460,13 @@ mod tests {
             },
             ScoredFile {
                 path: "src/config.rs".into(),
-                score: 0.1,
+                score: 0.05,
                 signals: vec![],
                 token_count: 10,
             },
             ScoredFile {
                 path: "src/utils.rs".into(),
-                score: 0.1,
+                score: 0.05,
                 signals: vec![],
                 token_count: 10,
             },
