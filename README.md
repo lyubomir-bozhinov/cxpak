@@ -186,7 +186,7 @@ To clear the cache and all output files:
 cxpak clean .
 ```
 
-## Supported Languages (40)
+## Supported Languages (42)
 
 **Tier 1 — Full extraction** (functions, classes, methods, imports, exports):
 Rust, TypeScript, JavaScript, Python, Java, Go, C, C++, Ruby, C#, Swift, Kotlin,
@@ -195,7 +195,10 @@ Bash, PHP, Dart, Scala, Lua, Elixir, Zig, Haskell, Groovy, Objective-C, R, Julia
 **Tier 2 — Structural extraction** (selectors, headings, keys, blocks, targets, etc.):
 CSS, SCSS, Markdown, JSON, YAML, TOML, Dockerfile, HCL/Terraform, Protobuf, Svelte, Makefile, HTML, GraphQL, XML
 
-Tree-sitter grammars are compiled in. All 40 languages are enabled by default. Language features can be toggled:
+**Database DSLs:**
+SQL, Prisma
+
+Tree-sitter grammars are compiled in. All 42 languages are enabled by default. Language features can be toggled:
 
 ```bash
 # Only Rust and Python support

@@ -148,6 +148,12 @@ impl LanguageRegistry {
 
         #[cfg(feature = "lang-xml")]
         self.register(Box::new(languages::xml::XmlLanguage));
+
+        #[cfg(feature = "lang-sql")]
+        self.register(Box::new(languages::sql::SqlLanguage));
+
+        #[cfg(feature = "lang-prisma")]
+        self.register(Box::new(languages::prisma::PrismaLanguage));
     }
 
     pub fn register(&mut self, lang: Box<dyn LanguageSupport>) {
@@ -178,8 +184,8 @@ mod tests {
         let registry = LanguageRegistry::new();
         let langs = registry.supported_languages();
         assert!(
-            langs.len() >= 40,
-            "expected at least 40 languages, got {}",
+            langs.len() >= 42,
+            "expected at least 42 languages, got {}",
             langs.len()
         );
         assert!(langs.contains(&"rust"));

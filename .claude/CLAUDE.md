@@ -48,7 +48,7 @@ Detail file extensions match `--format` (`.md`, `.json`, `.xml`).
 Finds target via `index.find_symbol()` (case-insensitive), falls back to `find_content_matches()`.
 Walks `DependencyGraph` — 1-hop default, full BFS with `--all`.
 
-## Supported Languages (40)
+## Supported Languages (42)
 
 **Tier 1 — Full extraction** (functions, classes, methods, imports, exports):
 Rust, TypeScript, JavaScript, Python, Java, Go, C, C++, Ruby, C#, Swift, Kotlin,
@@ -56,6 +56,9 @@ Bash, PHP, Dart, Scala, Lua, Elixir, Zig, Haskell, Groovy, Objective-C, R, Julia
 
 **Tier 2 — Structural extraction** (selectors, headings, keys, blocks, etc.):
 CSS, SCSS, Markdown, JSON, YAML, TOML, Dockerfile, HCL/Terraform, Protobuf, Svelte, Makefile, HTML, GraphQL, XML
+
+**Database DSLs:**
+SQL (via tree-sitter-sequel), Prisma
 
 ## Claude Code Plugin
 

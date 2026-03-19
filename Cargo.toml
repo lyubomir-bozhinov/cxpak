@@ -58,6 +58,8 @@ tree-sitter-make = { version = "1.1", optional = true }
 tree-sitter-html = { version = "0.23", optional = true }
 tree-sitter-graphql = { version = "0.1", optional = true }
 tree-sitter-xml = { version = "0.7", optional = true }
+tree-sitter-sequel = { version = "0.3", optional = true }
+tree-sitter-prisma-io = { version = "1.6", optional = true }
 regex = "1"
 notify = { version = "7", optional = true }
 axum = { version = "0.8", optional = true }
@@ -78,6 +80,7 @@ default = [
     "lang-scala", "lang-lua", "lang-elixir", "lang-zig", "lang-haskell",
     "lang-groovy", "lang-objc", "lang-r", "lang-julia", "lang-ocaml", "lang-matlab",
     "lang-proto", "lang-svelte", "lang-makefile", "lang-html", "lang-graphql", "lang-xml",
+    "lang-sql", "lang-prisma",
 ]
 lang-rust = ["dep:tree-sitter-rust"]
 lang-typescript = ["dep:tree-sitter-typescript"]
@@ -119,4 +122,6 @@ lang-makefile = ["dep:tree-sitter-make"]
 lang-html = ["dep:tree-sitter-html"]
 lang-graphql = ["dep:tree-sitter-graphql"]
 lang-xml = ["dep:tree-sitter-xml"]
+lang-sql = ["dep:tree-sitter-sequel"]
+lang-prisma = ["dep:tree-sitter-prisma-io"]
 daemon = ["dep:notify", "dep:axum", "dep:tokio"]

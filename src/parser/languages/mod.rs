@@ -119,3 +119,9 @@ pub mod graphql;
 
 #[cfg(feature = "lang-xml")]
 pub mod xml;
+
+#[cfg(feature = "lang-sql")]
+pub mod sql;
+
+#[cfg(feature = "lang-prisma")]
+pub mod prisma;

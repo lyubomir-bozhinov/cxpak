@@ -208,6 +208,8 @@ pub fn detect_language(path: &Path) -> Option<String> {
         "html" | "htm" => "html",
         "graphql" | "gql" => "graphql",
         "xml" | "xsd" | "xsl" | "svg" => "xml",
+        "sql" => "sql",
+        "prisma" => "prisma",
         _ => return None,
     };
     Some(lang.to_string())
@@ -416,6 +418,18 @@ mod tests {
                 result,
             );
         }
+    }
+
+    #[test]
+    fn test_detect_sql_and_prisma_extensions() {
+        assert_eq!(
+            detect_language(Path::new("schema.sql")),
+            Some("sql".to_string())
+        );
+        assert_eq!(
+            detect_language(Path::new("schema.prisma")),
+            Some("prisma".to_string())
+        );
     }
 
     #[test]
