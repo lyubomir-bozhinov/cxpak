@@ -151,6 +151,20 @@ The `overview` command produces a structured briefing with these sections:
 
 Each section has a budget allocation. When content exceeds its budget, it's truncated with the most important items preserved first.
 
+## Context Quality
+
+cxpak applies intelligent context management to maximize the usefulness of every token:
+
+**Progressive Degradation** — When content exceeds the budget, symbols are progressively reduced through 5 detail levels (Full → Trimmed → Documented → Signature → Stub). High-relevance files keep full detail while low-relevance dependencies are summarized. Selected files never degrade below Documented; dependencies can be dropped entirely as a last resort.
+
+**Concept Priority** — Symbols are ranked by type: functions/methods (1.0) > structs/classes (0.86) > API surface (0.71) > configuration (0.57) > documentation (0.43) > constants (0.29). This determines degradation order — functions survive longest.
+
+**Query Expansion** — When using `context_for_task`, queries are expanded with ~30 core synonym mappings (e.g., "auth" → authentication, login, jwt, oauth) plus 8 domain-specific maps (Web, Database, Auth, Infra, Testing, API, Mobile, ML) activated automatically by detecting file patterns in the repo.
+
+**Context Annotations** — Each packed file gets a language-aware comment header showing its relevance score, role (selected/dependency), signal breakdown, and detail level. The LLM knows exactly why each file was included and how much detail it's seeing.
+
+**Chunk Splitting** — Symbols exceeding 4000 tokens are split into labeled chunks (e.g., `handler [1/3]`) that degrade independently. Each chunk carries the parent signature for context.
+
 ## Pack Mode
 
 When a repo exceeds the token budget, cxpak automatically switches to **pack mode**:

@@ -13,13 +13,14 @@ Pre-commit hooks enforce fmt + clippy + tests. CI enforces 90% coverage via tarp
 
 ## Architecture
 
-Pipeline: **Scanner → Parser → Index → Budget → Output**
+Pipeline: **Scanner → Parser → Index → Budget → Context Quality → Output**
 
 1. **Scanner** (`src/scanner/`) — walks git-tracked files, detects language from extension
 2. **Parser** (`src/parser/`) — tree-sitter extraction of symbols, imports, exports per language
-3. **Index** (`src/index/`) — builds `CodebaseIndex` with token counts, language stats, dependency graph
+3. **Index** (`src/index/`) — builds `CodebaseIndex` with token counts, language stats, dependency graph, detected domains
 4. **Budget** (`src/budget/`) — allocates token budget across sections, truncates with omission markers
-5. **Output** (`src/output/`) — renders to markdown, JSON, or XML
+5. **Context Quality** (`src/context_quality/`) — progressive degradation, query expansion, context annotations
+6. **Output** (`src/output/`) — renders to markdown, JSON, or XML
 
 ## Commands
 
@@ -47,6 +48,16 @@ Detail file extensions match `--format` (`.md`, `.json`, `.xml`).
 
 Finds target via `index.find_symbol()` (case-insensitive), falls back to `find_content_matches()`.
 Walks `DependencyGraph` — 1-hop default, full BFS with `--all`.
+
+### Context Quality Module
+
+`src/context_quality/` contains three submodules:
+
+- **`degradation.rs`** — `DetailLevel` (Full→Trimmed→Documented→Signature→Stub), `FileRole` (Selected/Dependency), `concept_priority()` (7-tier SymbolKind ranking), `render_symbol_at_level()`, `split_oversized_symbol()` (chunks >4000 tokens), `allocate_with_degradation()` (budget-aware progressive detail reduction)
+- **`expansion.rs`** — `Domain` enum (8 domains), `detect_domains()` (file-pattern heuristics), `expand_query()` (~30 core synonyms + 8 domain-specific synonym maps)
+- **`annotation.rs`** — `comment_syntax()` (per-language comment prefix/suffix), `annotate_file()` (generates `[cxpak]` header with score, role, signals, detail level)
+
+`allocate_with_degradation()` takes `&[(&IndexedFile, FileRole, f64)]` — references, not owned. Selected files never degrade below Documented; dependencies can be dropped.
 
 ## Supported Languages (42)
 
