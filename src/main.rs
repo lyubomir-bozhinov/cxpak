@@ -3,6 +3,7 @@ mod commands;
 
 pub mod budget;
 pub mod cache;
+pub mod context_quality;
 #[cfg(feature = "daemon")]
 pub mod daemon;
 pub mod git;
