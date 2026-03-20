@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 /// Tokenize a string into lowercase parts split on non-alphanumeric chars and underscores.
 /// Also includes the lowercased whole word to handle all-caps identifiers (e.g., "API" -> "api").
-fn tokenize(s: &str) -> HashSet<String> {
+pub fn tokenize(s: &str) -> HashSet<String> {
     let mut tokens = HashSet::new();
     for word in s.split(|c: char| !c.is_alphanumeric() && c != '_') {
         let parts: Vec<String> = crate::index::split_identifier(word)
