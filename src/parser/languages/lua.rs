@@ -151,24 +151,29 @@ impl LanguageSupport for LuaLanguage {
                     let text = Self::node_text(&node, source_bytes);
                     if text.contains("function") && !text.contains("require") {
                         // local function-like variable: local f = function(...) end
+                        // AST: variable_declaration -> assignment_statement -> variable_list -> identifier
                         let mut inner_cursor = node.walk();
                         for child in node.children(&mut inner_cursor) {
-                            if child.kind() == "assignment_statement"
-                                || child.kind() == "variable_list"
-                            {
-                                let name = Self::extract_name(&child, source_bytes);
-                                if !name.is_empty() {
-                                    let start_line = node.start_position().row + 1;
-                                    let end_line = node.end_position().row + 1;
-                                    symbols.push(Symbol {
-                                        name,
-                                        kind: SymbolKind::Variable,
-                                        visibility: Visibility::Private,
-                                        signature: Self::first_line(&node, source_bytes),
-                                        body: String::new(),
-                                        start_line,
-                                        end_line,
-                                    });
+                            if child.kind() == "assignment_statement" {
+                                // Look for variable_list inside assignment_statement
+                                let mut assign_cursor = child.walk();
+                                for assign_child in child.children(&mut assign_cursor) {
+                                    if assign_child.kind() == "variable_list" {
+                                        let name = Self::extract_name(&assign_child, source_bytes);
+                                        if !name.is_empty() {
+                                            let start_line = node.start_position().row + 1;
+                                            let end_line = node.end_position().row + 1;
+                                            symbols.push(Symbol {
+                                                name,
+                                                kind: SymbolKind::Variable,
+                                                visibility: Visibility::Private,
+                                                signature: Self::first_line(&node, source_bytes),
+                                                body: String::new(),
+                                                start_line,
+                                                end_line,
+                                            });
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -335,6 +340,315 @@ end
         assert!(
             !result.imports.is_empty(),
             "expected standalone require import"
+        );
+    }
+
+    #[test]
+    fn test_coverage_multiple_requires() {
+        let source = r#"local json = require("cjson")
+local socket = require("socket")
+local lfs = require("lfs")
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = LuaLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            result.imports.len() >= 3,
+            "expected at least 3 require imports, got: {:?}",
+            result.imports
+        );
+    }
+
+    #[test]
+    fn test_coverage_dotted_require() {
+        let source = "local http = require(\"socket.http\")\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = LuaLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(!result.imports.is_empty(), "expected dotted require import");
+        let imp = &result.imports[0];
+        assert_eq!(imp.source, "socket.http");
+        assert!(
+            imp.names.iter().any(|n| n == "http"),
+            "expected short name 'http', got: {:?}",
+            imp.names
+        );
+    }
+
+    #[test]
+    fn test_coverage_table_function() {
+        let source = r#"local M = {}
+
+function M.greet(name)
+    print("Hello, " .. name)
+end
+
+function M.farewell(name)
+    print("Goodbye, " .. name)
+end
+
+return M
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = LuaLanguage;
+        let result = lang.extract(source, &tree);
+
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(
+            !funcs.is_empty(),
+            "expected table-style function declarations, got: {:?}",
+            result
+                .symbols
+                .iter()
+                .map(|s| (&s.name, &s.kind))
+                .collect::<Vec<_>>()
+        );
+        // Table functions (M.greet) are global/public
+        for f in &funcs {
+            assert_eq!(
+                f.visibility,
+                Visibility::Public,
+                "M.func should be public (not local)"
+            );
+        }
+    }
+
+    #[test]
+    fn test_coverage_nested_function() {
+        // Nested functions defined inside outer function
+        // Only top-level functions are extracted
+        let source = r#"function outer()
+    local function inner()
+        return 42
+    end
+    return inner()
+end
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = LuaLanguage;
+        let result = lang.extract(source, &tree);
+
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty(), "expected at least outer function");
+        // outer should be public
+        let outer = funcs.iter().find(|f| f.name == "outer");
+        assert!(outer.is_some(), "expected 'outer' function");
+        if let Some(f) = outer {
+            assert_eq!(f.visibility, Visibility::Public);
+        }
+    }
+
+    #[test]
+    fn test_coverage_local_function_private() {
+        let source = r#"local function private_helper(x)
+    return x * 2
+end
+
+function public_api(x)
+    return private_helper(x) + 1
+end
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = LuaLanguage;
+        let result = lang.extract(source, &tree);
+
+        let private_fn = result.symbols.iter().find(|s| s.name == "private_helper");
+        assert!(private_fn.is_some(), "expected private_helper function");
+        if let Some(f) = private_fn {
+            assert_eq!(f.visibility, Visibility::Private);
+        }
+
+        let public_fn = result.symbols.iter().find(|s| s.name == "public_api");
+        assert!(public_fn.is_some(), "expected public_api function");
+        if let Some(f) = public_fn {
+            assert_eq!(f.visibility, Visibility::Public);
+        }
+
+        // Only public function should be exported
+        assert!(
+            result.exports.iter().any(|e| e.name == "public_api"),
+            "public_api should be exported"
+        );
+        assert!(
+            !result.exports.iter().any(|e| e.name == "private_helper"),
+            "private_helper should not be exported"
+        );
+    }
+
+    #[test]
+    fn test_coverage_require_with_single_quotes() {
+        let source = "local yaml = require('yaml')\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = LuaLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            !result.imports.is_empty(),
+            "expected require with single quotes"
+        );
+        assert_eq!(result.imports[0].source, "yaml");
+    }
+
+    #[test]
+    fn test_method_index_expression() {
+        // function M:method(x) uses method_index_expression
+        let source = "function M:greet(name)\n    print(\"Hello\")\nend\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = LuaLanguage;
+        let result = lang.extract(source, &tree);
+
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty(), "expected method-style function");
+        assert!(
+            funcs[0].name.contains("greet"),
+            "name should contain greet, got: {}",
+            funcs[0].name
+        );
+        assert_eq!(funcs[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_local_function_variable() {
+        // local f = function(x) exercises the variable_declaration + function branch
+        let source = "local f = function(x)\n    return x * 2\nend\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = LuaLanguage;
+        let result = lang.extract(source, &tree);
+
+        let vars: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .collect();
+        assert!(
+            !vars.is_empty(),
+            "expected variable symbol for local function var, got symbols: {:?}",
+            result
+                .symbols
+                .iter()
+                .map(|s| (&s.name, &s.kind))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(vars[0].name, "f");
+        assert_eq!(vars[0].visibility, Visibility::Private);
+    }
+
+    #[test]
+    fn test_extract_require_import_no_require() {
+        // A function call that isn't require should not produce import
+        let source = "print(\"hello\")\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = LuaLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            result.imports.is_empty(),
+            "print() should not produce import"
+        );
+    }
+
+    #[test]
+    fn test_extract_name_empty() {
+        // Exercise extract_name on a node with no identifier/dot_index/method_index child
+        let source = "function greet(name)\n    print(name)\nend\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let root = tree.root_node();
+        // Root (chunk) has no identifier child
+        let name = LuaLanguage::extract_name(&root, source.as_bytes());
+        assert!(name.is_empty(), "chunk should have no identifier child");
+    }
+
+    #[test]
+    fn test_extract_fn_body_no_block() {
+        // Exercise extract_fn_body on a node with no block child
+        let source = "function greet(name)\n    print(name)\nend\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let root = tree.root_node();
+        // Call on root which has no block child
+        let body = LuaLanguage::extract_fn_body(&root, source.as_bytes());
+        assert!(body.is_empty(), "root should have no block child");
+    }
+
+    #[test]
+    fn test_variable_declaration_without_function() {
+        // local x = 42 should not produce a variable symbol (no function keyword)
+        let source = "local x = 42\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = LuaLanguage;
+        let result = lang.extract(source, &tree);
+
+        // Should not have any symbols (not a function, not a require)
+        let vars: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .collect();
+        assert!(
+            vars.is_empty(),
+            "local x = 42 should not produce variable symbol"
+        );
+    }
+
+    #[test]
+    fn test_variable_declaration_with_require_not_function() {
+        // local x = require("foo") should produce import but not variable
+        let source = "local x = require(\"foo\")\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = LuaLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(!result.imports.is_empty(), "require should produce import");
+        // Should NOT produce a variable symbol (contains require, not pure function)
+        let vars: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .collect();
+        assert!(
+            vars.is_empty(),
+            "require assignment should not produce variable symbol"
+        );
+    }
+
+    #[test]
+    fn test_is_local_function_false() {
+        // Global function should return false for is_local_function
+        let source = "function greet()\n    print(\"hi\")\nend\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let root = tree.root_node();
+        let func = root.child(0).unwrap();
+        assert_eq!(func.kind(), "function_declaration");
+        assert!(
+            !LuaLanguage::is_local_function(&func, source.as_bytes()),
+            "global function should not be local"
         );
     }
 }

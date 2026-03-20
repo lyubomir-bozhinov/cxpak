@@ -222,6 +222,66 @@ mod tests {
     }
 
     #[test]
+    fn test_self_closing_elements() {
+        // Self-closing elements (`<br/>`) exercise the EmptyElemTag branch
+        // in extract_tag_name and the depth-limiting logic.
+        let source = r#"<?xml version="1.0"?>
+<root>
+  <item/>
+  <other attr="val"/>
+</root>
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = XmlLanguage;
+        let result = lang.extract(source, &tree);
+
+        let elements: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Element)
+            .collect();
+        assert!(
+            elements.len() >= 2,
+            "expected root + self-closing elements, got: {:?}",
+            elements.iter().map(|e| &e.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_depth_limit_exceeded() {
+        // Deeply nested XML exercises the `current_depth > max_depth` early return.
+        let source = r#"<?xml version="1.0"?>
+<a>
+  <b>
+    <c>
+      <d>
+        <e>deep</e>
+      </d>
+    </c>
+  </b>
+</a>
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = XmlLanguage;
+        let result = lang.extract(source, &tree);
+
+        let elements: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Element)
+            .collect();
+        // With max_depth=2, we get a, b, c but NOT d or e
+        assert!(
+            elements.len() >= 2 && elements.len() <= 4,
+            "expected depth-limited elements, got {}: {:?}",
+            elements.len(),
+            elements.iter().map(|e| &e.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn test_complex_xml() {
         let source = r#"<?xml version="1.0" encoding="UTF-8"?>
 <configuration>

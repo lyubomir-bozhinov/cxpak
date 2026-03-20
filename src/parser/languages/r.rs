@@ -42,7 +42,7 @@ impl RLanguage {
     fn extract_fn_body(node: &tree_sitter::Node, source: &[u8]) -> String {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "brace_list" || child.kind() == "braced_expression" {
+            if child.kind() == "braced_expression" {
                 let text = &source[child.start_byte()..child.end_byte()];
                 return String::from_utf8_lossy(text).into_owned();
             }
@@ -108,20 +108,6 @@ impl RLanguage {
                     }
                 }
             }
-            // Also handle direct children (some grammars don't wrap in argument)
-            let kind = child.kind();
-            if kind == "identifier" || kind == "string" {
-                let text = Self::node_text(&child, source)
-                    .trim_matches('"')
-                    .trim_matches('\'')
-                    .to_string();
-                if !text.is_empty() && text != "," && text != "(" && text != ")" {
-                    return Some(Import {
-                        source: text.clone(),
-                        names: vec![text],
-                    });
-                }
-            }
         }
         None
     }
@@ -149,9 +135,8 @@ impl LanguageSupport for RLanguage {
         for node in root.children(&mut cursor) {
             match node.kind() {
                 // Assignments: my_func <- function(x) { ... }
-                // tree-sitter-r uses "binary_operator" for both <- and = assignments
-                "left_assignment" | "equals_assignment" | "right_assignment"
-                | "binary_operator" => {
+                // tree-sitter-r uses "binary_operator" for all assignment operators
+                "binary_operator" => {
                     if Self::is_function_assignment(&node, source_bytes) {
                         let name = Self::extract_name(&node, source_bytes);
                         let signature = Self::first_line(&node, source_bytes);
@@ -317,6 +302,72 @@ name <- "hello"
     }
 
     #[test]
+    fn test_right_assignment_ignored() {
+        // Right-assignment `10 -> y` is a binary_operator but not a function assignment
+        let source = "10 -> y\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            result.symbols.is_empty(),
+            "right assignment of literal should not produce symbols"
+        );
+    }
+
+    #[test]
+    fn test_library_string_import() {
+        // library() with a string argument
+        let source = "library(\"stringr\")\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            !result.imports.is_empty(),
+            "expected import from library(\"stringr\")"
+        );
+        assert_eq!(result.imports[0].source, "stringr");
+    }
+
+    #[test]
+    fn test_non_library_call_ignored() {
+        // Other function calls should not produce imports
+        let source = "print(42)\ncat(\"hello\")\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            result.imports.is_empty(),
+            "non-library calls should not produce imports"
+        );
+    }
+
+    #[test]
+    fn test_function_body_extraction() {
+        let source = r#"add <- function(a, b) {
+    a + b
+}
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RLanguage;
+        let result = lang.extract(source, &tree);
+
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty(), "expected function");
+        assert!(!funcs[0].body.is_empty(), "function should have a body");
+    }
+
+    #[test]
     fn test_equals_assignment_function() {
         let source = r#"greet = function(name) {
     paste("Hello,", name)
@@ -333,5 +384,36 @@ name <- "hello"
             .filter(|s| s.kind == SymbolKind::Function)
             .collect();
         assert!(!funcs.is_empty(), "expected function from = assignment");
+    }
+
+    #[test]
+    fn test_inline_function_no_braces() {
+        // Function without braced_expression body
+        let source = "inc <- function(x) x + 1\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = RLanguage;
+        let result = lang.extract(source, &tree);
+
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty(), "expected function from inline def");
+    }
+
+    #[test]
+    fn test_extract_name_no_identifier() {
+        // An assignment node without identifier should return empty
+        let mut parser = make_parser();
+        let source = "42\n";
+        let tree = parser.parse(source, None).unwrap();
+        let root = tree.root_node();
+        let mut cursor = root.walk();
+        for child in root.children(&mut cursor) {
+            let name = RLanguage::extract_name(&child, source.as_bytes());
+            assert!(name.is_empty(), "non-assignment should have empty name");
+        }
     }
 }

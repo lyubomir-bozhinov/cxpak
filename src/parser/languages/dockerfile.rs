@@ -331,6 +331,61 @@ CMD ["node", "dist/server.js"]
     }
 
     #[test]
+    fn test_from_without_alias() {
+        // FROM without AS exercises the `None` path of extract_from_alias,
+        // which is the `else` branch in the name construction.
+        let source = "FROM scratch\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = DockerfileLanguage;
+        let result = lang.extract(source, &tree);
+
+        let sections: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Section)
+            .collect();
+        assert!(!sections.is_empty(), "expected FROM section");
+        // Name should be just the image, no "(as ...)" suffix
+        assert!(
+            !sections[0].name.contains("(as"),
+            "expected no alias, got: {}",
+            sections[0].name
+        );
+    }
+
+    #[test]
+    fn test_all_instruction_types() {
+        // Exercise instruction kinds not hit by other tests: ADD, VOLUME, USER,
+        // HEALTHCHECK, SHELL, STOPSIGNAL, ONBUILD, MAINTAINER.
+        let source = r#"FROM alpine
+ADD . /app
+VOLUME /data
+USER nobody
+HEALTHCHECK CMD curl -f http://localhost/ || exit 1
+SHELL ["/bin/bash", "-c"]
+STOPSIGNAL SIGTERM
+ONBUILD RUN echo "building"
+MAINTAINER test@example.com
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = DockerfileLanguage;
+        let result = lang.extract(source, &tree);
+
+        let instructions: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Instruction)
+            .collect();
+        assert!(
+            instructions.len() >= 6,
+            "expected many instruction types, got: {:?}",
+            instructions.iter().map(|i| &i.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn test_arg_instruction() {
         let source = r#"ARG BASE_IMAGE=node:18
 FROM ${BASE_IMAGE}

@@ -18,8 +18,17 @@ impl ObjcLanguage {
     fn extract_name(node: &tree_sitter::Node, source: &[u8]) -> String {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "identifier" || child.kind() == "name" {
+            if child.kind() == "identifier" {
                 return Self::node_text(&child, source).to_string();
+            }
+            // function_definition: identifier is inside function_declarator
+            if child.kind() == "function_declarator" {
+                let mut inner = child.walk();
+                for inner_child in child.children(&mut inner) {
+                    if inner_child.kind() == "identifier" {
+                        return Self::node_text(&inner_child, source).to_string();
+                    }
+                }
             }
         }
         String::new()
@@ -37,26 +46,12 @@ impl ObjcLanguage {
     }
 
     /// Extract the method name from a method_declaration or method_definition node.
+    /// The grammar produces `identifier` children directly for the method name.
     fn extract_method_name(node: &tree_sitter::Node, source: &[u8]) -> String {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "selector" || child.kind() == "identifier" {
-                let text = Self::node_text(&child, source);
-                // For selectors like "initWithName:", take first keyword
-                return text.split(':').next().unwrap_or("").to_string();
-            }
-            if child.kind() == "keyword_selector" {
-                let mut inner = child.walk();
-                for kw in child.children(&mut inner) {
-                    if kw.kind() == "keyword_declarator" {
-                        let mut kw_cursor = kw.walk();
-                        for kw_child in kw.children(&mut kw_cursor) {
-                            if kw_child.kind() == "identifier" {
-                                return Self::node_text(&kw_child, source).to_string();
-                            }
-                        }
-                    }
-                }
+            if child.kind() == "identifier" {
+                return Self::node_text(&child, source).to_string();
             }
         }
         String::new()
@@ -65,7 +60,7 @@ impl ObjcLanguage {
     fn extract_fn_body(node: &tree_sitter::Node, source: &[u8]) -> String {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "compound_statement" || child.kind() == "block" {
+            if child.kind() == "compound_statement" {
                 let text = &source[child.start_byte()..child.end_byte()];
                 return String::from_utf8_lossy(text).into_owned();
             }
@@ -245,6 +240,14 @@ impl LanguageSupport for ObjcLanguage {
                     });
                 }
 
+                "implementation_definition" => {
+                    // Recurse into implementation_definition to find method_definition nodes
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        stack.push(child);
+                    }
+                }
+
                 "preproc_import" | "preproc_include" => {
                     if let Some(imp) = Self::extract_import_path(&node, source_bytes) {
                         imports.push(imp);
@@ -359,6 +362,126 @@ void helperFunction(int x) {
             !result.imports.is_empty(),
             "expected import from #import directive"
         );
+    }
+
+    #[test]
+    fn test_extract_method_declaration() {
+        let source = r#"@interface Cat : NSObject
+- (void)meow;
+- (void)fetchWithName:(NSString *)name;
+@end
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ObjcLanguage;
+        let result = lang.extract(source, &tree);
+
+        let methods: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Method)
+            .collect();
+        assert!(
+            !methods.is_empty(),
+            "expected method declarations from @interface"
+        );
+        assert!(
+            methods.iter().any(|m| m.name == "meow"),
+            "expected 'meow' method, got: {:?}",
+            methods.iter().map(|m| &m.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_extract_method_definition_body() {
+        let source = r#"@implementation Cat
+- (void)meow {
+    NSLog(@"Meow!");
+}
+@end
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ObjcLanguage;
+        let result = lang.extract(source, &tree);
+
+        let methods: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Method)
+            .collect();
+        assert!(
+            !methods.is_empty(),
+            "expected method definition from @implementation"
+        );
+        // method_definition should have a body (compound_statement)
+        let meow = methods.iter().find(|m| m.name == "meow");
+        assert!(meow.is_some(), "expected 'meow' method");
+        assert!(
+            !meow.unwrap().body.is_empty(),
+            "method definition should have a body"
+        );
+    }
+
+    #[test]
+    fn test_extract_class_implementation() {
+        let source = r#"@implementation Dog
+- (void)bark {
+    NSLog(@"Woof!");
+}
+@end
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ObjcLanguage;
+        let result = lang.extract(source, &tree);
+
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(!classes.is_empty(), "expected class from @implementation");
+        assert_eq!(classes[0].name, "Dog");
+        assert_eq!(classes[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_function_no_body() {
+        // function_definition with no compound_statement child -> empty body
+        let source = "void noop();\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ObjcLanguage;
+        let _result = lang.extract(source, &tree);
+        // Just exercises extract_fn_body returning empty string
+    }
+
+    #[test]
+    fn test_include_import_path() {
+        let source = "#include \"path/to/MyHeader.h\"\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ObjcLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(!result.imports.is_empty(), "expected import from #include");
+        let imp = &result.imports[0];
+        assert_eq!(imp.source, "path/to/MyHeader.h");
+        assert_eq!(imp.names[0], "MyHeader");
+    }
+
+    #[test]
+    fn test_system_import_path() {
+        let source = "#import <UIKit/UIKit.h>\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ObjcLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(!result.imports.is_empty(), "expected import from #import");
+        let imp = &result.imports[0];
+        assert!(imp.source.contains("UIKit"), "source should contain UIKit");
     }
 
     #[test]

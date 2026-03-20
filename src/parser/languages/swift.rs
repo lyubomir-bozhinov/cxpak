@@ -16,20 +16,16 @@ impl SwiftLanguage {
     }
 
     fn extract_name(node: &tree_sitter::Node, source: &[u8]) -> String {
+        // The grammar always provides a `name` field for declarations.
         if let Some(name_node) = node.child_by_field_name("name") {
             return Self::node_text(&name_node, source).to_string();
-        }
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "simple_identifier" || child.kind() == "identifier" {
-                return Self::node_text(&child, source).to_string();
-            }
         }
         String::new()
     }
 
     /// Swift visibility comes from modifier nodes: `public`, `private`, `internal`, `open`.
     /// The default visibility is `internal` — treated as Private here.
+    /// The grammar wraps visibility in `modifiers > visibility_modifier > public/open`.
     fn extract_visibility(node: &tree_sitter::Node, source: &[u8]) -> Visibility {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -40,60 +36,51 @@ impl SwiftLanguage {
                     return Visibility::Public;
                 }
             }
-            // Some grammars surface modifiers as direct children with keyword kinds
-            if kind == "public" || kind == "open" {
-                return Visibility::Public;
-            }
         }
         Visibility::Private
     }
 
     fn extract_fn_body(node: &tree_sitter::Node, source: &[u8]) -> String {
-        if let Some(body_node) = node.child_by_field_name("body") {
-            let text = &source[body_node.start_byte()..body_node.end_byte()];
-            return String::from_utf8_lossy(text).into_owned();
-        }
-        // Fall back to looking for a code_block child
+        // The grammar uses `function_body` as a child kind for function bodies.
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "code_block" || child.kind() == "function_body" {
+            if child.kind() == "function_body" || child.kind() == "code_block" {
                 let text = &source[child.start_byte()..child.end_byte()];
                 return String::from_utf8_lossy(text).into_owned();
             }
         }
+        // function_declaration nodes always have a body in the grammar
         String::new()
     }
 
     fn extract_fn_signature(node: &tree_sitter::Node, source: &[u8]) -> String {
         let full_text = Self::node_text(node, source);
         // Signature is everything before the body block
-        if let Some(body_node) = node.child_by_field_name("body") {
-            let body_start = body_node.start_byte() - node.start_byte();
-            return full_text[..body_start].trim().to_string();
-        }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "code_block" || child.kind() == "function_body" {
+            if child.kind() == "function_body" || child.kind() == "code_block" {
                 let body_start = child.start_byte() - node.start_byte();
                 return full_text[..body_start].trim().to_string();
             }
         }
-        full_text.lines().next().unwrap_or("").trim().to_string()
+        // Fallback: return first line (for declarations without body)
+        Self::first_line(node, source)
     }
 
     /// Determine the SymbolKind for a `class_declaration` node by inspecting the
     /// `declaration_kind` field, which contains tokens like `class`, `struct`, `enum`,
     /// `actor`, `extension`.
+    /// The grammar always provides a `declaration_kind` field for class_declaration nodes.
     fn class_declaration_kind(node: &tree_sitter::Node, source: &[u8]) -> SymbolKind {
-        if let Some(kind_node) = node.child_by_field_name("declaration_kind") {
-            let kind_text = Self::node_text(&kind_node, source);
-            return match kind_text {
-                "struct" => SymbolKind::Struct,
-                "enum" => SymbolKind::Enum,
-                _ => SymbolKind::Class,
-            };
+        let kind_text = node
+            .child_by_field_name("declaration_kind")
+            .map(|n| Self::node_text(&n, source))
+            .unwrap_or("class");
+        match kind_text {
+            "struct" => SymbolKind::Struct,
+            "enum" => SymbolKind::Enum,
+            _ => SymbolKind::Class,
         }
-        SymbolKind::Class
     }
 
     /// Extract the import path from an `import_declaration` node.

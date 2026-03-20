@@ -21,7 +21,7 @@ use std::time::Duration;
 type SharedIndex = Arc<RwLock<CodebaseIndex>>;
 
 fn matches_focus(path: &str, focus: Option<&str>) -> bool {
-    focus.map_or(true, |f| path.starts_with(f))
+    focus.is_none_or(|f| path.starts_with(f))
 }
 
 /// Scan and parse all files in a path, returning a fully built CodebaseIndex.

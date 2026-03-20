@@ -23,7 +23,7 @@ impl CssLanguage {
     fn extract_selector(node: &tree_sitter::Node, source: &[u8]) -> String {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "selectors" || child.kind() == "selector" {
+            if child.kind() == "selectors" {
                 return Self::node_text(&child, source).trim().to_string();
             }
         }
@@ -167,7 +167,6 @@ impl LanguageSupport for CssLanguage {
                 "media_statement"
                 | "keyframes_statement"
                 | "supports_statement"
-                | "at_rule"
                 | "charset_statement"
                 | "namespace_statement" => {
                     let rule_name = Self::extract_at_rule_name(&node, source_bytes);
@@ -371,6 +370,112 @@ body {
                 .iter()
                 .all(|s| s.visibility == Visibility::Public),
             "all CSS symbols should be public"
+        );
+    }
+
+    #[test]
+    fn test_charset_statement() {
+        let source = "@charset \"UTF-8\";\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = CssLanguage;
+        let result = lang.extract(source, &tree);
+
+        let rules: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Rule)
+            .collect();
+        assert!(!rules.is_empty(), "expected @charset rule");
+        assert!(rules[0].name.contains("charset"));
+    }
+
+    #[test]
+    fn test_namespace_statement() {
+        let source = "@namespace svg url(http://www.w3.org/2000/svg);\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = CssLanguage;
+        let result = lang.extract(source, &tree);
+
+        let rules: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Rule)
+            .collect();
+        assert!(!rules.is_empty(), "expected @namespace rule");
+        assert!(rules[0].name.contains("namespace"));
+    }
+
+    #[test]
+    fn test_supports_statement() {
+        let source = "@supports (display: grid) {\n  .grid { display: grid; }\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = CssLanguage;
+        let result = lang.extract(source, &tree);
+
+        let rules: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Rule)
+            .collect();
+        assert!(!rules.is_empty(), "expected @supports rule");
+        assert!(rules[0].name.contains("supports"));
+    }
+
+    #[test]
+    fn test_import_url_form() {
+        let source = "@import url(\"typography.css\");\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = CssLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            !result.imports.is_empty(),
+            "expected import from url() form"
+        );
+    }
+
+    #[test]
+    fn test_nested_block_variables() {
+        // Custom properties inside a nested block (e.g., media query)
+        let source = r#".container {
+    --spacing: 10px;
+}
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = CssLanguage;
+        let result = lang.extract(source, &tree);
+
+        let vars: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .collect();
+        assert!(!vars.is_empty(), "expected CSS variable from nested block");
+        assert!(vars[0].name.starts_with("--"));
+    }
+
+    #[test]
+    fn test_non_custom_property_ignored() {
+        // Regular declarations (not --custom) should not produce Variable symbols
+        let source = ":root {\n    color: red;\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = CssLanguage;
+        let result = lang.extract(source, &tree);
+
+        let vars: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .collect();
+        assert!(
+            vars.is_empty(),
+            "regular CSS properties should not produce Variable symbols"
         );
     }
 

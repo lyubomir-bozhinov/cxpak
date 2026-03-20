@@ -310,6 +310,53 @@ main() {
     }
 
     #[test]
+    fn test_dot_source_import() {
+        // The `.` (dot) command is an alias for `source` — exercises the `cmd == "."` branch.
+        let source = ". /etc/profile\n. ./lib.sh\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = BashLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            !result.imports.is_empty(),
+            "expected imports from dot-source commands, got: {:?}",
+            result.imports
+        );
+    }
+
+    #[test]
+    fn test_non_source_command_skipped() {
+        // A regular command (not `source` or `.`) should not produce imports,
+        // exercising the `return None` branch in extract_source_import.
+        let source = "echo hello\nls -la\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = BashLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            result.imports.is_empty(),
+            "regular commands should not produce imports"
+        );
+    }
+
+    #[test]
+    fn test_source_without_path() {
+        // `source` with no argument exercises the `is_source && path.is_empty()` false branch.
+        let source = "source\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = BashLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            result.imports.is_empty(),
+            "source without path should not produce imports"
+        );
+    }
+
+    #[test]
     fn test_function_with_keyword() {
         let source = r#"function deploy() {
     echo "deploying..."

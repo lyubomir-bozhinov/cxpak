@@ -329,6 +329,49 @@ message Event {
     }
 
     #[test]
+    fn test_import_path_fallback() {
+        // The extract_import_path fallback parses quotes from the raw text when
+        // no `string` child kind is found.  We verify that standard imports work
+        // and that the short_name trimming of `.proto` works correctly.
+        let source = r#"syntax = "proto3";
+import "deeply/nested/path/types.proto";
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ProtoLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            !result.imports.is_empty(),
+            "expected import from nested path"
+        );
+        let imp = &result.imports[0];
+        assert_eq!(imp.source, "deeply/nested/path/types.proto");
+        assert_eq!(imp.names[0], "types");
+    }
+
+    #[test]
+    fn test_empty_message_name_skipped() {
+        // Exercises the `!name.is_empty()` guard on messages/enums/services.
+        // A syntax-only file with no definitions should produce no symbols.
+        let source = "syntax = \"proto3\";\npackage test;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ProtoLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            result.symbols.is_empty(),
+            "syntax+package should produce no symbols, got: {:?}",
+            result
+                .symbols
+                .iter()
+                .map(|s| (&s.name, &s.kind))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn test_complex_proto() {
         let source = r#"syntax = "proto3";
 

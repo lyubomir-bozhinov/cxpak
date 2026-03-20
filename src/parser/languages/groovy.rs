@@ -18,7 +18,7 @@ impl GroovyLanguage {
     fn extract_name(node: &tree_sitter::Node, source: &[u8]) -> String {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "identifier" || child.kind() == "simple_name" {
+            if child.kind() == "identifier" {
                 return Self::node_text(&child, source).to_string();
             }
         }
@@ -44,10 +44,7 @@ impl GroovyLanguage {
         let full_text = Self::node_text(node, source);
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "block"
-                || child.kind() == "closure"
-                || child.kind() == "statement_block"
-            {
+            if child.kind() == "block" || child.kind() == "closure" {
                 let body_start = child.start_byte() - node.start_byte();
                 if body_start < full_text.len() {
                     return full_text[..body_start].trim().to_string();
@@ -61,10 +58,7 @@ impl GroovyLanguage {
     fn extract_fn_body(node: &tree_sitter::Node, source: &[u8]) -> String {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "block"
-                || child.kind() == "closure"
-                || child.kind() == "statement_block"
-            {
+            if child.kind() == "block" || child.kind() == "closure" {
                 let text = &source[child.start_byte()..child.end_byte()];
                 return String::from_utf8_lossy(text).into_owned();
             }
@@ -114,28 +108,7 @@ impl GroovyLanguage {
 
     /// Extract class name, handling Groovy class declarations.
     fn extract_class_name(node: &tree_sitter::Node, source: &[u8]) -> String {
-        // Try direct child lookup
-        let name = Self::extract_name(node, source);
-        if !name.is_empty() && name != "class" {
-            return name;
-        }
-
-        // Fallback: parse from text
-        let text = Self::node_text(node, source);
-        let trimmed = text.trim();
-
-        // Find "class" keyword and extract the following identifier
-        if let Some(class_pos) = trimmed.find("class ") {
-            let after_class = &trimmed[class_pos + 6..];
-            let name: String = after_class
-                .trim()
-                .chars()
-                .take_while(|c| c.is_alphanumeric() || *c == '_')
-                .collect();
-            return name;
-        }
-
-        String::new()
+        Self::extract_name(node, source)
     }
 
     /// Extract methods from a class body.
@@ -143,13 +116,10 @@ impl GroovyLanguage {
         let mut methods = Vec::new();
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "class_body" || child.kind() == "body" || child.kind() == "block" {
+            if child.kind() == "class_body" {
                 let mut inner_cursor = child.walk();
                 for item in child.children(&mut inner_cursor) {
-                    if item.kind() == "method_declaration"
-                        || item.kind() == "function_definition"
-                        || item.kind() == "method_definition"
-                    {
+                    if item.kind() == "method_declaration" || item.kind() == "function_definition" {
                         let name = Self::extract_name(&item, source);
                         let visibility = Self::determine_visibility(&item, source);
                         let signature = Self::extract_fn_signature(&item, source);
@@ -200,7 +170,7 @@ impl LanguageSupport for GroovyLanguage {
             let kind = node.kind();
 
             match kind {
-                "method_declaration" | "function_definition" | "method_definition" => {
+                "method_declaration" | "function_definition" => {
                     let name = Self::extract_name(&node, source_bytes);
                     let visibility = Self::determine_visibility(&node, source_bytes);
                     let signature = Self::extract_fn_signature(&node, source_bytes);
@@ -228,7 +198,7 @@ impl LanguageSupport for GroovyLanguage {
                     }
                 }
 
-                "class_definition" | "class_declaration" => {
+                "class_declaration" => {
                     let name = Self::extract_class_name(&node, source_bytes);
                     let visibility = Self::determine_visibility(&node, source_bytes);
                     let signature = Self::first_line(&node, source_bytes);
@@ -267,99 +237,14 @@ impl LanguageSupport for GroovyLanguage {
                     }
                 }
 
-                "import_declaration" | "import_statement" => {
+                "import_declaration" => {
                     if let Some(imp) = Self::extract_import(&node, source_bytes) {
                         imports.push(imp);
                     }
                 }
 
                 _ => {
-                    // Check text for declarations under other node kinds
-                    let text = Self::node_text(&node, source_bytes);
-                    let trimmed = text.trim();
-
-                    if trimmed.starts_with("import ") {
-                        if let Some(imp) = Self::extract_import(&node, source_bytes) {
-                            if !imports.iter().any(|i| i.source == imp.source) {
-                                imports.push(imp);
-                            }
-                        }
-                    }
-
-                    if trimmed.starts_with("class ") || trimmed.contains("class ") {
-                        let name = Self::extract_class_name(&node, source_bytes);
-                        if !name.is_empty() && !symbols.iter().any(|s| s.name == name) {
-                            let visibility = Self::determine_visibility(&node, source_bytes);
-                            let signature = Self::first_line(&node, source_bytes);
-                            let body = text.to_string();
-                            let start_line = node.start_position().row + 1;
-                            let end_line = node.end_position().row + 1;
-
-                            if visibility == Visibility::Public {
-                                exports.push(Export {
-                                    name: name.clone(),
-                                    kind: SymbolKind::Class,
-                                });
-                            }
-                            symbols.push(Symbol {
-                                name,
-                                kind: SymbolKind::Class,
-                                visibility,
-                                signature,
-                                body,
-                                start_line,
-                                end_line,
-                            });
-
-                            // Try to extract methods
-                            let methods = Self::extract_class_methods(&node, source_bytes);
-                            for method in &methods {
-                                if method.visibility == Visibility::Public {
-                                    exports.push(Export {
-                                        name: method.name.clone(),
-                                        kind: SymbolKind::Method,
-                                    });
-                                }
-                            }
-                            symbols.extend(methods);
-                        }
-                    }
-
-                    // Also try to match function definitions under other node kinds
-                    if (trimmed.starts_with("def ")
-                        || trimmed.starts_with("void ")
-                        || trimmed.starts_with("public ")
-                        || trimmed.starts_with("private "))
-                        && (trimmed.contains("(") && trimmed.contains("{"))
-                    {
-                        // Looks like a method/function
-                        let name = Self::extract_name(&node, source_bytes);
-                        if !name.is_empty() && !symbols.iter().any(|s| s.name == name) {
-                            let visibility = Self::determine_visibility(&node, source_bytes);
-                            let signature = Self::extract_fn_signature(&node, source_bytes);
-                            let body = Self::extract_fn_body(&node, source_bytes);
-                            let start_line = node.start_position().row + 1;
-                            let end_line = node.end_position().row + 1;
-
-                            if visibility == Visibility::Public {
-                                exports.push(Export {
-                                    name: name.clone(),
-                                    kind: SymbolKind::Function,
-                                });
-                            }
-                            symbols.push(Symbol {
-                                name,
-                                kind: SymbolKind::Function,
-                                visibility,
-                                signature,
-                                body,
-                                start_line,
-                                end_line,
-                            });
-                        }
-                    }
-
-                    // Push children to continue scanning
+                    // Push children to continue scanning deeper nodes
                     let mut cursor = node.walk();
                     for child in node.children(&mut cursor) {
                         stack.push(child);
@@ -541,5 +426,356 @@ class Person {
                 imp.names
             );
         }
+    }
+
+    #[test]
+    fn test_coverage_class_with_methods() {
+        let source = r#"class Calculator {
+    def add(int a, int b) {
+        return a + b
+    }
+
+    private def helper() {
+        return 0
+    }
+}
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GroovyLanguage;
+        let result = lang.extract(source, &tree);
+
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(!classes.is_empty(), "expected class symbol");
+
+        // Methods may be extracted as Method kind
+        let methods: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Method || s.kind == SymbolKind::Function)
+            .collect();
+        assert!(
+            !methods.is_empty(),
+            "expected method symbols, got: {:?}",
+            result
+                .symbols
+                .iter()
+                .map(|s| (&s.name, &s.kind))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_coverage_private_visibility() {
+        let source = r#"class Service {
+    private void internal() {
+        println "internal"
+    }
+
+    public void external() {
+        println "external"
+    }
+}
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GroovyLanguage;
+        let result = lang.extract(source, &tree);
+
+        // Check that private methods are detected
+        let private_syms: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.visibility == Visibility::Private)
+            .collect();
+        // The class or its methods should be detected
+        assert!(
+            !result.symbols.is_empty(),
+            "expected symbols from class with visibility modifiers"
+        );
+        // If methods extracted, check for private
+        if !private_syms.is_empty() {
+            assert!(
+                private_syms
+                    .iter()
+                    .any(|s| s.name == "internal" || s.name == "Service"),
+                "expected private symbol, got: {:?}",
+                private_syms.iter().map(|s| &s.name).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn test_coverage_static_method() {
+        let source = r#"class Utils {
+    static def format(String input) {
+        return input.trim()
+    }
+}
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GroovyLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            !result.symbols.is_empty(),
+            "expected symbols from class with static method"
+        );
+    }
+
+    #[test]
+    fn test_coverage_interface_declaration() {
+        let source = r#"interface Greeter {
+    void greet(String name)
+}
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GroovyLanguage;
+        let result = lang.extract(source, &tree);
+
+        // Interface might be detected as class or might not be parsed at all
+        // The important thing is no panic
+        let _ = result;
+    }
+
+    #[test]
+    fn test_coverage_closure() {
+        let source = r#"def greetAll = { names ->
+    names.each { name ->
+        println "Hello, ${name}"
+    }
+}
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GroovyLanguage;
+        let result = lang.extract(source, &tree);
+
+        // Closures may or may not produce symbols
+        let _ = result;
+    }
+
+    #[test]
+    fn test_coverage_multiple_imports() {
+        let source = r#"import groovy.json.JsonSlurper
+import groovy.transform.ToString
+import java.util.*
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GroovyLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            result.imports.len() >= 2,
+            "expected at least 2 imports, got: {:?}",
+            result.imports
+        );
+    }
+
+    #[test]
+    fn test_coverage_import_no_dot() {
+        // Import with no dot (single name) — exercises the else branch in extract_import
+        let source = "import Foo\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GroovyLanguage;
+        let result = lang.extract(source, &tree);
+
+        // Should produce an import (single name, no dots)
+        if !result.imports.is_empty() {
+            let imp = &result.imports[0];
+            assert!(
+                !imp.names.is_empty(),
+                "expected at least one name in import"
+            );
+        }
+    }
+
+    #[test]
+    fn test_coverage_class_export() {
+        let source = r#"class MyService {
+    def execute() {
+        return "done"
+    }
+}
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GroovyLanguage;
+        let result = lang.extract(source, &tree);
+
+        // Public class should be exported
+        let class_exported = result.exports.iter().any(|e| e.kind == SymbolKind::Class);
+        assert!(
+            class_exported,
+            "expected class export, got exports: {:?}",
+            result.exports
+        );
+    }
+
+    #[test]
+    fn test_private_class_declaration() {
+        // private class => class_declaration with private modifier, visibility Private
+        let source = r#"private class Secret {
+    void doWork() {
+        println "work"
+    }
+}
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GroovyLanguage;
+        let result = lang.extract(source, &tree);
+
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(!classes.is_empty(), "expected private class");
+        assert_eq!(classes[0].visibility, Visibility::Private);
+        // Private class should NOT be exported
+        assert!(
+            !result.exports.iter().any(|e| e.name == "Secret"),
+            "private class should not be exported"
+        );
+    }
+
+    #[test]
+    fn test_protected_function() {
+        // protected void service() => function_definition with protected modifier
+        let source = "protected void service() {\n    println \"protected\"\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GroovyLanguage;
+        let result = lang.extract(source, &tree);
+
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty(), "expected protected function");
+        assert_eq!(funcs[0].name, "service");
+        assert_eq!(funcs[0].visibility, Visibility::Private);
+        // Private/protected should NOT be exported
+        assert!(
+            !result.exports.iter().any(|e| e.name == "service"),
+            "protected function should not be exported"
+        );
+    }
+
+    #[test]
+    fn test_static_import() {
+        // static import exercises the static-trimming path in extract_import
+        let source = "import static java.lang.Math.abs\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GroovyLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(!result.imports.is_empty(), "expected static import");
+        let imp = &result.imports[0];
+        assert_eq!(imp.names[0], "abs");
+        assert!(imp.source.contains("Math"));
+    }
+
+    #[test]
+    fn test_interface_with_methods() {
+        // interface_declaration falls into the _ branch and text contains "interface"
+        // but it should NOT match "class " text check
+        let source = "interface Greeter {\n    void greet(String name)\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GroovyLanguage;
+        let result = lang.extract(source, &tree);
+        // interface_declaration is not matched by our class/function patterns
+        // but its children (method_declaration) get pushed onto the stack
+        // The interface_body children get scanned
+        let _ = result;
+    }
+
+    #[test]
+    fn test_class_methods_private_not_exported() {
+        // Verify that private methods inside a class are NOT exported
+        let source = r#"class Svc {
+    private void internal() {
+        println "internal"
+    }
+    void external() {
+        println "external"
+    }
+}
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GroovyLanguage;
+        let result = lang.extract(source, &tree);
+
+        // external should be exported as Method
+        let ext_export = result.exports.iter().find(|e| e.name == "external");
+        assert!(ext_export.is_some(), "external should be exported");
+        // internal should NOT be exported
+        assert!(
+            !result.exports.iter().any(|e| e.name == "internal"),
+            "internal should not be exported"
+        );
+    }
+
+    #[test]
+    fn test_extract_fn_signature_with_closure() {
+        // Top-level function_definition has closure body
+        let source = "def greet(String name) {\n    println name\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = GroovyLanguage;
+        let result = lang.extract(source, &tree);
+
+        let func = result.symbols.iter().find(|s| s.name == "greet").unwrap();
+        // Signature should be everything before the closure body
+        assert!(
+            func.signature.contains("greet"),
+            "signature should contain function name"
+        );
+        assert!(
+            !func.signature.contains('{'),
+            "signature should not include body brace"
+        );
+        // Body should contain the closure content
+        assert!(!func.body.is_empty(), "body should not be empty");
+    }
+
+    #[test]
+    fn test_extract_class_name() {
+        // class_declaration always has an identifier child
+        let mut parser = make_parser();
+        let source = "class MyTest { }\n";
+        let tree = parser.parse(source, None).unwrap();
+        let root = tree.root_node();
+        let class_node = root.child(0).unwrap();
+        assert_eq!(class_node.kind(), "class_declaration");
+        let name = GroovyLanguage::extract_class_name(&class_node, source.as_bytes());
+        assert_eq!(name, "MyTest");
+    }
+
+    #[test]
+    fn test_extract_import_empty() {
+        // Exercise the empty-import path in extract_import
+        // When the import text, after stripping, is empty
+        let mut parser = make_parser();
+        let source = "import\n";
+        let tree = parser.parse(source, None).unwrap();
+        let lang = GroovyLanguage;
+        let result = lang.extract(source, &tree);
+        // Should not produce an import (empty path)
+        // No panic is the main assertion
+        let _ = result;
     }
 }

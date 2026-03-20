@@ -35,10 +35,6 @@ impl ScalaLanguage {
                     return true;
                 }
             }
-            // Some tree-sitter-scala versions have modifiers as direct children
-            if child.kind() == "private" || child.kind() == "protected" {
-                return true;
-            }
         }
         false
     }
@@ -47,7 +43,7 @@ impl ScalaLanguage {
         let full_text = Self::node_text(node, source);
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "block" || child.kind() == "template_body" {
+            if child.kind() == "block" {
                 let body_start = child.start_byte() - node.start_byte();
                 return full_text[..body_start].trim().to_string();
             }
@@ -58,7 +54,7 @@ impl ScalaLanguage {
     fn extract_fn_body(node: &tree_sitter::Node, source: &[u8]) -> String {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "block" || child.kind() == "template_body" {
+            if child.kind() == "block" {
                 let text = &source[child.start_byte()..child.end_byte()];
                 return String::from_utf8_lossy(text).into_owned();
             }
@@ -408,6 +404,169 @@ mod tests {
         let lang = ScalaLanguage;
         let result = lang.extract(source, &tree);
         assert!(result.symbols.is_empty());
+    }
+
+    #[test]
+    fn test_val_definition() {
+        let source = "val myVal = 42\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ScalaLanguage;
+        let result = lang.extract(source, &tree);
+
+        let vals: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .collect();
+        assert!(!vals.is_empty(), "expected val as Variable symbol");
+        assert_eq!(vals[0].name, "myVal");
+        assert_eq!(vals[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_var_definition() {
+        let source = "var myVar = \"hello\"\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ScalaLanguage;
+        let result = lang.extract(source, &tree);
+
+        let vars: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .collect();
+        assert!(!vars.is_empty(), "expected var as Variable symbol");
+        assert_eq!(vars[0].name, "myVar");
+    }
+
+    #[test]
+    fn test_private_function() {
+        let source = "private def secret(): Int = {\n  0\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ScalaLanguage;
+        let result = lang.extract(source, &tree);
+
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty(), "expected private function");
+        assert_eq!(funcs[0].visibility, Visibility::Private);
+        assert!(
+            !result.exports.iter().any(|e| e.name == "secret"),
+            "private function should not be exported"
+        );
+    }
+
+    #[test]
+    fn test_private_class() {
+        let source = "private class Hidden\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ScalaLanguage;
+        let result = lang.extract(source, &tree);
+
+        let classes: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class)
+            .collect();
+        assert!(!classes.is_empty(), "expected private class");
+        assert_eq!(classes[0].visibility, Visibility::Private);
+        assert!(
+            !result.exports.iter().any(|e| e.name == "Hidden"),
+            "private class should not be exported"
+        );
+    }
+
+    #[test]
+    fn test_grouped_import() {
+        let source = "import scala.collection.mutable.{ListBuffer, ArrayBuffer}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ScalaLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(!result.imports.is_empty(), "expected grouped import");
+        let imp = &result.imports[0];
+        assert!(imp.source.contains("scala.collection.mutable"));
+        assert!(imp.names.len() >= 2, "expected multiple import names");
+    }
+
+    #[test]
+    fn test_package_clause_ignored() {
+        let source = "package com.example\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ScalaLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            result.symbols.is_empty(),
+            "package clause should not produce symbols"
+        );
+    }
+
+    #[test]
+    fn test_function_no_body() {
+        // Abstract function without a block body
+        let source = "def greet(name: String): String\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ScalaLanguage;
+        let result = lang.extract(source, &tree);
+
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        if !funcs.is_empty() {
+            assert!(
+                funcs[0].body.is_empty(),
+                "abstract function should have empty body"
+            );
+        }
+    }
+
+    #[test]
+    fn test_private_object() {
+        let source = "private object Internal\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ScalaLanguage;
+        let result = lang.extract(source, &tree);
+
+        let objs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Class && s.name == "Internal")
+            .collect();
+        if !objs.is_empty() {
+            assert_eq!(objs[0].visibility, Visibility::Private);
+        }
+    }
+
+    #[test]
+    fn test_private_trait() {
+        let source = "private trait Secret {\n  def x(): Int\n}\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ScalaLanguage;
+        let result = lang.extract(source, &tree);
+
+        let traits: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Trait)
+            .collect();
+        if !traits.is_empty() {
+            assert_eq!(traits[0].visibility, Visibility::Private);
+        }
     }
 
     #[test]

@@ -15,17 +15,6 @@ impl ZigLanguage {
         text.lines().next().unwrap_or("").trim().to_string()
     }
 
-    #[allow(dead_code)]
-    fn extract_name(node: &tree_sitter::Node, source: &[u8]) -> String {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "identifier" || child.kind() == "IDENTIFIER" {
-                return Self::node_text(&child, source).to_string();
-            }
-        }
-        String::new()
-    }
-
     /// Check if a declaration has the `pub` visibility keyword.
     fn has_pub_keyword(node: &tree_sitter::Node, source: &[u8]) -> bool {
         let text = Self::node_text(node, source);
@@ -37,7 +26,7 @@ impl ZigLanguage {
         let full_text = Self::node_text(node, source);
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "block" || child.kind() == "Block" {
+            if child.kind() == "block" {
                 let body_start = child.start_byte() - node.start_byte();
                 if body_start < full_text.len() {
                     return full_text[..body_start].trim().to_string();
@@ -51,7 +40,7 @@ impl ZigLanguage {
     fn extract_fn_body(node: &tree_sitter::Node, source: &[u8]) -> String {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "block" || child.kind() == "Block" {
+            if child.kind() == "block" {
                 let text = &source[child.start_byte()..child.end_byte()];
                 return String::from_utf8_lossy(text).into_owned();
             }
@@ -101,58 +90,47 @@ impl LanguageSupport for ZigLanguage {
         let mut imports: Vec<Import> = Vec::new();
         let mut exports: Vec<Export> = Vec::new();
 
-        // Zig tree-sitter grammar uses different node kinds.
-        // Walk all top-level children.
-        let mut stack: Vec<tree_sitter::Node> = root.children(&mut root.walk()).collect();
-
-        while let Some(node) = stack.pop() {
+        // tree-sitter-zig produces `function_declaration` and `variable_declaration`
+        // as top-level children of `source_file`.
+        let mut cursor = root.walk();
+        for node in root.children(&mut cursor) {
             let kind = node.kind();
 
             match kind {
-                // Function declarations: fn_decl, FnDecl, or Decl containing fn
-                "FnDecl" | "fn_decl" | "TopLevelDecl" => {
+                "function_declaration" => {
                     let text = Self::node_text(&node, source_bytes);
-                    if text.contains("fn ") {
-                        let name = Self::extract_fn_name_from_text(text);
-                        let is_pub = Self::has_pub_keyword(&node, source_bytes);
-                        let visibility = if is_pub {
-                            Visibility::Public
-                        } else {
-                            Visibility::Private
-                        };
-                        let signature = Self::extract_fn_signature(&node, source_bytes);
-                        let body = Self::extract_fn_body(&node, source_bytes);
-                        let start_line = node.start_position().row + 1;
-                        let end_line = node.end_position().row + 1;
+                    let name = Self::extract_fn_name_from_text(text);
+                    let is_pub = Self::has_pub_keyword(&node, source_bytes);
+                    let visibility = if is_pub {
+                        Visibility::Public
+                    } else {
+                        Visibility::Private
+                    };
+                    let signature = Self::extract_fn_signature(&node, source_bytes);
+                    let body = Self::extract_fn_body(&node, source_bytes);
+                    let start_line = node.start_position().row + 1;
+                    let end_line = node.end_position().row + 1;
 
-                        if !name.is_empty() {
-                            if is_pub {
-                                exports.push(Export {
-                                    name: name.clone(),
-                                    kind: SymbolKind::Function,
-                                });
-                            }
-                            symbols.push(Symbol {
-                                name,
+                    if !name.is_empty() {
+                        if is_pub {
+                            exports.push(Export {
+                                name: name.clone(),
                                 kind: SymbolKind::Function,
-                                visibility,
-                                signature,
-                                body,
-                                start_line,
-                                end_line,
                             });
                         }
-                    } else {
-                        // Could be a variable/const declaration at top level
-                        let mut cursor = node.walk();
-                        for child in node.children(&mut cursor) {
-                            stack.push(child);
-                        }
+                        symbols.push(Symbol {
+                            name,
+                            kind: SymbolKind::Function,
+                            visibility,
+                            signature,
+                            body,
+                            start_line,
+                            end_line,
+                        });
                     }
                 }
 
-                // Variable/const declarations
-                "VarDecl" | "var_decl" => {
+                "variable_declaration" => {
                     let text = Self::node_text(&node, source_bytes);
                     let is_pub = Self::has_pub_keyword(&node, source_bytes);
                     let visibility = if is_pub {
@@ -204,109 +182,7 @@ impl LanguageSupport for ZigLanguage {
                     }
                 }
 
-                // Some grammars wrap top-level declarations in a container
-                "ContainerDecl" | "container_decl" => {
-                    let mut cursor = node.walk();
-                    for child in node.children(&mut cursor) {
-                        stack.push(child);
-                    }
-                }
-
-                _ => {
-                    // For any other node, check if it might contain declarations
-                    // and push children
-                    let text = Self::node_text(&node, source_bytes);
-
-                    // Handle cases where the grammar wraps things differently
-                    if text.contains("fn ") || text.contains("const ") || text.contains("@import") {
-                        // Try to extract fn declaration from text
-                        if text.contains("fn ") && !text.starts_with("//") {
-                            let is_pub = text.starts_with("pub ");
-                            let fn_name = Self::extract_fn_name_from_text(text);
-                            if !fn_name.is_empty() && !symbols.iter().any(|s| s.name == fn_name) {
-                                let visibility = if is_pub {
-                                    Visibility::Public
-                                } else {
-                                    Visibility::Private
-                                };
-                                let signature = Self::first_line(&node, source_bytes);
-                                let body = Self::extract_fn_body(&node, source_bytes);
-                                let start_line = node.start_position().row + 1;
-                                let end_line = node.end_position().row + 1;
-
-                                if is_pub {
-                                    exports.push(Export {
-                                        name: fn_name.clone(),
-                                        kind: SymbolKind::Function,
-                                    });
-                                }
-                                symbols.push(Symbol {
-                                    name: fn_name,
-                                    kind: SymbolKind::Function,
-                                    visibility,
-                                    signature,
-                                    body,
-                                    start_line,
-                                    end_line,
-                                });
-                            }
-                        }
-
-                        // Try to extract const/var declarations
-                        if (text.starts_with("const ") || text.starts_with("pub const "))
-                            && !symbols
-                                .iter()
-                                .any(|s| s.name == Self::extract_const_name(text))
-                        {
-                            let is_pub = text.starts_with("pub ");
-                            if text.contains("@import(") {
-                                if let Some(imp) =
-                                    Self::extract_import_from_var(&node, source_bytes)
-                                {
-                                    if !imports.iter().any(|i| i.source == imp.source) {
-                                        imports.push(imp);
-                                    }
-                                }
-                            }
-
-                            let name = Self::extract_const_name(text);
-                            if !name.is_empty() && !name.contains('@') {
-                                let sym_kind = if text.contains("struct") {
-                                    SymbolKind::Struct
-                                } else {
-                                    SymbolKind::Constant
-                                };
-                                let visibility = if is_pub {
-                                    Visibility::Public
-                                } else {
-                                    Visibility::Private
-                                };
-
-                                if is_pub {
-                                    exports.push(Export {
-                                        name: name.clone(),
-                                        kind: sym_kind.clone(),
-                                    });
-                                }
-
-                                let signature = Self::first_line(&node, source_bytes);
-                                let body = Self::node_text(&node, source_bytes).to_string();
-                                let start_line = node.start_position().row + 1;
-                                let end_line = node.end_position().row + 1;
-
-                                symbols.push(Symbol {
-                                    name,
-                                    kind: sym_kind,
-                                    visibility,
-                                    signature,
-                                    body,
-                                    start_line,
-                                    end_line,
-                                });
-                            }
-                        }
-                    }
-                }
+                _ => {}
             }
         }
 
@@ -467,15 +343,7 @@ const fs = @import("std").fs;
             .iter()
             .filter(|s| s.kind == SymbolKind::Struct)
             .collect();
-        assert!(
-            !structs.is_empty(),
-            "expected struct symbol, got symbols: {:?}",
-            result
-                .symbols
-                .iter()
-                .map(|s| (&s.name, &s.kind))
-                .collect::<Vec<_>>()
-        );
+        assert!(!structs.is_empty(), "expected struct symbol");
         assert_eq!(structs[0].name, "Point");
         assert_eq!(structs[0].visibility, Visibility::Public);
     }
@@ -495,14 +363,286 @@ const internal_val = 42;
             .iter()
             .filter(|s| s.kind == SymbolKind::Constant)
             .collect();
+        assert!(!constants.is_empty(), "expected constant symbols");
+        // Should have both pub and private constants
+        assert!(constants.len() >= 2, "expected at least 2 constants");
+    }
+
+    #[test]
+    fn test_coverage_function_with_parameters() {
+        let source = r#"pub fn add(a: i32, b: i32) i32 {
+    return a + b;
+}
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ZigLanguage;
+        let result = lang.extract(source, &tree);
+
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function && s.name == "add")
+            .collect();
+        assert!(!funcs.is_empty(), "expected function 'add'");
+        assert_eq!(funcs[0].visibility, Visibility::Public);
         assert!(
-            !constants.is_empty(),
-            "expected constant symbols, got: {:?}",
+            !funcs[0].signature.is_empty(),
+            "expected non-empty signature"
+        );
+        assert!(!funcs[0].body.is_empty(), "expected non-empty body");
+    }
+
+    #[test]
+    fn test_coverage_private_const() {
+        let source = "const internal_limit = 256;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ZigLanguage;
+        let result = lang.extract(source, &tree);
+
+        let consts: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Constant)
+            .collect();
+        assert!(!consts.is_empty(), "expected private constant");
+        assert_eq!(consts[0].visibility, Visibility::Private);
+        assert!(
+            result.exports.iter().all(|e| e.name != "internal_limit"),
+            "private const should not be exported"
+        );
+    }
+
+    #[test]
+    fn test_coverage_import_extraction() {
+        let source = r#"const std = @import("std");
+const mem = @import("std").mem;
+const c = @import("c_lib.zig");
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ZigLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            !result.imports.is_empty(),
+            "expected at least 1 import, got: {:?}",
+            result.imports
+        );
+        let c_import = result.imports.iter().find(|i| i.source == "c_lib.zig");
+        if let Some(imp) = c_import {
+            assert!(
+                imp.names.iter().any(|n| n == "c_lib"),
+                "expected .zig stripped from import name, got: {:?}",
+                imp.names
+            );
+        }
+    }
+
+    #[test]
+    fn test_coverage_pub_const_struct() {
+        let source = r#"pub const Config = struct {
+    debug: bool,
+    verbose: bool,
+};
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ZigLanguage;
+        let result = lang.extract(source, &tree);
+
+        let structs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Struct)
+            .collect();
+        assert!(!structs.is_empty(), "expected struct");
+        let exported = result.exports.iter().any(|e| e.name == "Config");
+        assert!(exported, "pub const struct should be exported");
+    }
+
+    #[test]
+    fn test_coverage_mixed_declarations() {
+        let source = r#"const std = @import("std");
+
+pub const VERSION = 42;
+
+pub fn init() void {
+    return;
+}
+
+fn cleanup() void {
+    return;
+}
+
+pub const State = struct {
+    running: bool,
+};
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ZigLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(!result.imports.is_empty(), "expected imports from @import");
+        assert!(
+            result.symbols.len() >= 3,
+            "expected multiple symbols, got: {:?}",
             result
                 .symbols
                 .iter()
-                .map(|s| (&s.name, &s.kind))
+                .map(|s| (&s.name, &s.kind, &s.visibility))
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn test_coverage_extract_fn_name_from_text() {
+        assert_eq!(
+            ZigLanguage::extract_fn_name_from_text("pub fn main() void {"),
+            "main"
+        );
+        assert_eq!(
+            ZigLanguage::extract_fn_name_from_text("fn helper() u32 {"),
+            "helper"
+        );
+        assert_eq!(ZigLanguage::extract_fn_name_from_text("const x = 42;"), "");
+    }
+
+    #[test]
+    fn test_coverage_extract_const_name() {
+        assert_eq!(
+            ZigLanguage::extract_const_name("pub const Foo = struct {};"),
+            "Foo"
+        );
+        assert_eq!(ZigLanguage::extract_const_name("const bar = 42;"), "bar");
+        assert_eq!(ZigLanguage::extract_const_name("var x = 1;"), "");
+    }
+
+    #[test]
+    fn test_packed_struct() {
+        let source = r#"pub const Header = packed struct {
+    magic: u32,
+    version: u16,
+};
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ZigLanguage;
+        let result = lang.extract(source, &tree);
+
+        let structs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Struct)
+            .collect();
+        assert!(!structs.is_empty(), "expected packed struct symbol");
+        assert_eq!(structs[0].name, "Header");
+    }
+
+    #[test]
+    fn test_var_declaration_not_const() {
+        let source = "var mutable: u32 = 0;\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ZigLanguage;
+        let result = lang.extract(source, &tree);
+        assert!(
+            result.symbols.is_empty(),
+            "var (non-const) should not produce symbols"
+        );
+    }
+
+    #[test]
+    fn test_import_with_path() {
+        let source = "const utils = @import(\"lib/utils.zig\");\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ZigLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(!result.imports.is_empty(), "expected import");
+        let imp = &result.imports[0];
+        assert_eq!(imp.source, "lib/utils.zig");
+        assert!(
+            imp.names.contains(&"utils".to_string()),
+            "expected 'utils' name after stripping path and .zig"
+        );
+    }
+
+    #[test]
+    fn test_fn_signature_no_block() {
+        let mut parser = make_parser();
+        let source = "const x = 42;\n";
+        let tree = parser.parse(source, None).unwrap();
+        let root = tree.root_node();
+        let node = root.child(0).unwrap();
+        let sig = ZigLanguage::extract_fn_signature(&node, source.as_bytes());
+        assert_eq!(sig, "const x = 42;");
+    }
+
+    #[test]
+    fn test_fn_body_no_block() {
+        let mut parser = make_parser();
+        let source = "const x = 42;\n";
+        let tree = parser.parse(source, None).unwrap();
+        let root = tree.root_node();
+        let node = root.child(0).unwrap();
+        let body = ZigLanguage::extract_fn_body(&node, source.as_bytes());
+        assert!(body.is_empty(), "no block means empty body");
+    }
+
+    #[test]
+    fn test_extract_import_from_var_no_import() {
+        let mut parser = make_parser();
+        let source = "const x = 42;\n";
+        let tree = parser.parse(source, None).unwrap();
+        let root = tree.root_node();
+        let node = root.child(0).unwrap();
+        let result = ZigLanguage::extract_import_from_var(&node, source.as_bytes());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_unknown_node_kind_ignored() {
+        let source = "// just a comment\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = ZigLanguage;
+        let result = lang.extract(source, &tree);
+        assert!(result.symbols.is_empty());
+    }
+
+    #[test]
+    fn test_has_pub_keyword() {
+        let mut parser = make_parser();
+        let source = "pub const X = 1;\n";
+        let tree = parser.parse(source, None).unwrap();
+        let root = tree.root_node();
+        let node = root.child(0).unwrap();
+        assert!(ZigLanguage::has_pub_keyword(&node, source.as_bytes()));
+
+        let source2 = "const Y = 2;\n";
+        let tree2 = parser.parse(source2, None).unwrap();
+        let root2 = tree2.root_node();
+        let node2 = root2.child(0).unwrap();
+        assert!(!ZigLanguage::has_pub_keyword(&node2, source2.as_bytes()));
+    }
+
+    #[test]
+    fn test_first_line() {
+        let mut parser = make_parser();
+        let source = "pub const Z = struct {\n  x: u32,\n};\n";
+        let tree = parser.parse(source, None).unwrap();
+        let root = tree.root_node();
+        let node = root.child(0).unwrap();
+        let fl = ZigLanguage::first_line(&node, source.as_bytes());
+        assert_eq!(fl, "pub const Z = struct {");
+    }
+
+    #[test]
+    fn test_empty_fn_name() {
+        assert_eq!(ZigLanguage::extract_fn_name_from_text("fn () void {}"), "");
     }
 }

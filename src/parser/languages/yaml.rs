@@ -20,27 +20,18 @@ impl YamlLanguage {
     }
 
     /// Extract the key text from a block_mapping_pair node.
+    /// The grammar always wraps keys in `flow_node` children.
     fn extract_key_name(node: &tree_sitter::Node, source: &[u8]) -> String {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            let kind = child.kind();
-            // tree-sitter-yaml may use different node types for keys
-            if kind == "flow_node"
-                || kind == "block_node"
-                || kind == "plain_scalar"
-                || kind == "double_quote_scalar"
-                || kind == "single_quote_scalar"
-                || kind == "tag"
-            {
+            if child.kind() == "flow_node" {
                 let text = Self::node_text(&child, source).trim().to_string();
                 if !text.is_empty() {
                     return text.trim_matches('"').trim_matches('\'').to_string();
                 }
             }
         }
-        // Fallback: take the first non-whitespace token before ":"
-        let text = Self::node_text(node, source);
-        text.split(':').next().unwrap_or("").trim().to_string()
+        String::new()
     }
 
     /// Check if a block_mapping_pair's value is itself a block_mapping (nested map).
@@ -50,23 +41,17 @@ impl YamlLanguage {
         for child in node.children(&mut cursor) {
             if seen_key {
                 // The value part
-                if child.kind() == "block_node" || child.kind() == "block_mapping" {
+                if child.kind() == "block_node" {
                     // Check if it contains a block_mapping
                     let mut inner_cursor = child.walk();
                     for inner in child.children(&mut inner_cursor) {
-                        if inner.kind() == "block_mapping" || inner.kind() == "block_mapping_pair" {
+                        if inner.kind() == "block_mapping" {
                             return true;
                         }
                     }
                 }
             }
-            if (child.kind() == "flow_node"
-                || child.kind() == "plain_scalar"
-                || child.kind() == "double_quote_scalar"
-                || child.kind() == "single_quote_scalar"
-                || child.kind() == "block_node")
-                && !seen_key
-            {
+            if child.kind() == "flow_node" && !seen_key {
                 seen_key = true;
             }
         }
@@ -151,19 +136,6 @@ impl LanguageSupport for YamlLanguage {
                         }
                     } else {
                         Self::extract_mapping_pairs(&child, source_bytes, &mut symbols, true);
-                    }
-                }
-            }
-
-            // Also check if the doc_node itself is a block_mapping
-            if doc_node.kind() == "block_mapping" {
-                Self::extract_mapping_pairs(&doc_node, source_bytes, &mut symbols, true);
-            }
-            if doc_node.kind() == "block_node" {
-                let mut inner_cursor = doc_node.walk();
-                for inner in doc_node.children(&mut inner_cursor) {
-                    if inner.kind() == "block_mapping" {
-                        Self::extract_mapping_pairs(&inner, source_bytes, &mut symbols, true);
                     }
                 }
             }
@@ -294,6 +266,70 @@ spec:
                 .iter()
                 .all(|s| s.visibility == Visibility::Public),
             "all YAML symbols should be public"
+        );
+    }
+
+    #[test]
+    fn test_multi_document() {
+        // Tests the second document path (doc_node.kind() == "block_node" at line 162)
+        let source = "a: 1\n---\nb: 2\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = YamlLanguage;
+        let result = lang.extract(source, &tree);
+
+        let names: Vec<_> = result.symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"a"), "expected key 'a', got: {:?}", names);
+        assert!(names.contains(&"b"), "expected key 'b', got: {:?}", names);
+    }
+
+    #[test]
+    fn test_quoted_keys() {
+        let source = "\"quoted_key\": value1\n'single_quoted': value2\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = YamlLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(
+            !result.symbols.is_empty(),
+            "expected symbols from quoted keys"
+        );
+    }
+
+    #[test]
+    fn test_nested_block_kind() {
+        // Nested mapping should produce Block kind at top level
+        let source = "parent:\n  child: value\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = YamlLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(!result.symbols.is_empty(), "expected symbols");
+        let parent = result.symbols.iter().find(|s| s.name == "parent");
+        assert!(parent.is_some(), "expected 'parent' symbol");
+        assert_eq!(
+            parent.unwrap().kind,
+            SymbolKind::Block,
+            "top-level nested mapping should be Block"
+        );
+    }
+
+    #[test]
+    fn test_flat_key_kind() {
+        // Flat key:value should produce Key kind
+        let source = "simple: value\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = YamlLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(!result.symbols.is_empty(), "expected symbols");
+        assert_eq!(
+            result.symbols[0].kind,
+            SymbolKind::Key,
+            "flat key should be Key kind"
         );
     }
 

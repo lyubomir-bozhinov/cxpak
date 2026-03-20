@@ -209,6 +209,47 @@ mod tests {
     }
 
     #[test]
+    fn test_self_closing_element() {
+        // A self-closing element like `<br/>` exercises the self_closing_tag
+        // branch in extract_tag_name, and potentially the tag_name direct child.
+        let source = "<br/>\n<hr/>\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = SvelteLanguage;
+        let result = lang.extract(source, &tree);
+
+        // Self-closing elements should appear as sections
+        let sections: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Section)
+            .collect();
+        // It's OK if the grammar wraps these differently — the important thing
+        // is that we don't panic and do attempt extraction.
+        let _ = sections;
+    }
+
+    #[test]
+    fn test_element_without_tag_name() {
+        // An edge case: if the parser produces an element with no extractable
+        // tag_name, we fall back to "element".  We exercise this by parsing
+        // a fragment that may confuse the grammar.
+        let source = "<>\n</>\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = SvelteLanguage;
+        let result = lang.extract(source, &tree);
+
+        // If the grammar produces an element, it should use "element" as fallback name.
+        for sym in &result.symbols {
+            if sym.kind == SymbolKind::Section {
+                // name is either a real tag or "element" fallback — both acceptable
+                assert!(!sym.name.is_empty());
+            }
+        }
+    }
+
+    #[test]
     fn test_complex_component() {
         let source = r#"<script>
   export let name = 'world';

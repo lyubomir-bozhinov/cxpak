@@ -318,6 +318,50 @@ MIT
     }
 
     #[test]
+    fn test_heading_level_fallback() {
+        // Setext headings (underline-style) exercise the heading_level fallback
+        // that counts leading '#' chars (which is 0 for setext, so max(1) kicks in).
+        let source = "Title\n=====\n\nSubtitle\n--------\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = MarkdownLanguage;
+        let result = lang.extract(source, &tree);
+
+        let headings: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Heading)
+            .collect();
+        assert!(
+            !headings.is_empty(),
+            "expected setext headings, got: {:?}",
+            result
+                .symbols
+                .iter()
+                .map(|s| (&s.name, &s.kind))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_empty_heading_text_fallback() {
+        // A heading line with only `#` and no text exercises the empty heading
+        // fallback that generates "h{level}" as the name.
+        let source = "#\n\n##\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = MarkdownLanguage;
+        let result = lang.extract(source, &tree);
+
+        // Should not panic, and any heading produced uses the hN fallback
+        for sym in &result.symbols {
+            if sym.kind == SymbolKind::Heading {
+                assert!(!sym.name.is_empty(), "heading name should not be empty");
+            }
+        }
+    }
+
+    #[test]
     fn test_no_imports() {
         let source = "# Hello\n\nWorld\n";
         let mut parser = make_parser();

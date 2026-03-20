@@ -402,6 +402,154 @@ end
     }
 
     #[test]
+    fn test_extract_macro() {
+        let source = r#"macro mymacro(ex)
+    return ex
+end
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = JuliaLanguage;
+        let result = lang.extract(source, &tree);
+
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty(), "expected macro as function symbol");
+        assert_eq!(funcs[0].name, "mymacro");
+        assert_eq!(funcs[0].visibility, Visibility::Private);
+    }
+
+    #[test]
+    fn test_exported_macro() {
+        let source = r#"module M
+export mymacro
+macro mymacro(ex)
+    return ex
+end
+end
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = JuliaLanguage;
+        let result = lang.extract(source, &tree);
+
+        let macros: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function && s.name == "mymacro")
+            .collect();
+        assert!(!macros.is_empty(), "expected macro symbol");
+        assert_eq!(macros[0].visibility, Visibility::Public);
+        assert!(
+            result.exports.iter().any(|e| e.name == "mymacro"),
+            "exported macro should appear in exports"
+        );
+    }
+
+    #[test]
+    fn test_exported_struct() {
+        let source = r#"module M
+export Point
+struct Point
+    x::Float64
+    y::Float64
+end
+end
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = JuliaLanguage;
+        let result = lang.extract(source, &tree);
+
+        let structs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Struct && s.name == "Point")
+            .collect();
+        assert!(!structs.is_empty(), "expected struct symbol");
+        assert_eq!(structs[0].visibility, Visibility::Public);
+        assert!(
+            result.exports.iter().any(|e| e.name == "Point"),
+            "exported struct should appear in exports"
+        );
+    }
+
+    #[test]
+    fn test_one_line_function_body_empty() {
+        // A function with only signature + end (2 lines) should have empty body
+        let source = "function noop()\nend\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = JuliaLanguage;
+        let result = lang.extract(source, &tree);
+
+        let funcs: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert!(!funcs.is_empty(), "expected function symbol");
+        assert!(
+            funcs[0].body.is_empty(),
+            "two-line function should have empty body"
+        );
+    }
+
+    #[test]
+    fn test_import_multiple_names() {
+        let source = "import Foo: bar, baz, qux\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = JuliaLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(!result.imports.is_empty(), "expected import");
+        let imp = &result.imports[0];
+        assert!(
+            imp.source.contains("Foo") || imp.source.contains("Base"),
+            "import source should contain module name"
+        );
+    }
+
+    #[test]
+    fn test_using_simple() {
+        let source = "using LinearAlgebra\n";
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = JuliaLanguage;
+        let result = lang.extract(source, &tree);
+
+        assert!(!result.imports.is_empty(), "expected import from using");
+        let imp = &result.imports[0];
+        assert_eq!(imp.source, "LinearAlgebra");
+    }
+
+    #[test]
+    fn test_multiple_exports() {
+        let source = r#"module M
+export foo, bar
+function foo() end
+function bar() end
+end
+"#;
+        let mut parser = make_parser();
+        let tree = parser.parse(source, None).expect("parse failed");
+        let lang = JuliaLanguage;
+        let result = lang.extract(source, &tree);
+
+        let exported: Vec<_> = result.exports.iter().map(|e| &e.name).collect();
+        // Module is always exported, plus foo and bar if in export list
+        assert!(
+            result.exports.len() >= 2,
+            "expected at least 2 exports, got: {:?}",
+            exported
+        );
+    }
+
+    #[test]
     fn test_extract_struct() {
         let source = r#"struct Point
     x::Float64
