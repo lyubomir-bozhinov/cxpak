@@ -82,10 +82,10 @@ pub fn apply_focus(scores: &mut [FileScore], focus_path: &str, graph: &Dependenc
     let mut dep_files: std::collections::HashSet<String> = std::collections::HashSet::new();
     for f in &focus_files {
         if let Some(deps) = graph.dependencies(f) {
-            dep_files.extend(deps.iter().cloned());
+            dep_files.extend(deps.iter().map(|e| e.target.clone()));
         }
         for dep in graph.dependents(f) {
-            dep_files.insert(dep.to_string());
+            dep_files.insert(dep.target.to_string());
         }
     }
     for f in &focus_files {
@@ -105,6 +105,7 @@ pub fn apply_focus(scores: &mut [FileScore], focus_path: &str, graph: &Dependenc
 mod tests {
     use super::*;
     use crate::git::{CommitInfo, ContributorInfo, FileChurn};
+    use crate::schema::EdgeType;
 
     fn make_git_context(file_churns: Vec<(&str, usize)>, dates: Vec<&str>) -> GitContext {
         GitContext {
@@ -135,8 +136,8 @@ mod tests {
     #[test]
     fn test_rank_files_basic() {
         let mut graph = DependencyGraph::new();
-        graph.add_edge("app.rs", "lib.rs");
-        graph.add_edge("cli.rs", "lib.rs");
+        graph.add_edge("app.rs", "lib.rs", EdgeType::Import);
+        graph.add_edge("cli.rs", "lib.rs", EdgeType::Import);
 
         let paths = vec!["app.rs".into(), "cli.rs".into(), "lib.rs".into()];
         let scores = rank_files(&paths, &graph, None);
@@ -186,7 +187,7 @@ mod tests {
     #[test]
     fn test_apply_focus() {
         let mut graph = DependencyGraph::new();
-        graph.add_edge("src/auth/mod.rs", "src/db/users.rs");
+        graph.add_edge("src/auth/mod.rs", "src/db/users.rs", EdgeType::Import);
 
         let mut scores = vec![
             FileScore {

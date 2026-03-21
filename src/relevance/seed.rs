@@ -58,7 +58,7 @@ pub fn select_seeds_with_graph(
     let graph = match prebuilt_graph {
         Some(g) => g,
         None => {
-            owned_graph = build_dependency_graph(index);
+            owned_graph = build_dependency_graph(index, None);
             &owned_graph
         }
     };
@@ -74,12 +74,12 @@ pub fn select_seeds_with_graph(
 
         // Outgoing dependencies (files this seed depends on)
         if let Some(deps) = graph.dependencies(seed_path) {
-            neighbors.extend(deps.iter().cloned());
+            neighbors.extend(deps.iter().map(|e| e.target.clone()));
         }
 
         // Incoming dependents (files that depend on this seed)
         for dep in graph.dependents(seed_path) {
-            neighbors.push(dep.to_string());
+            neighbors.push(dep.target.to_string());
         }
 
         for neighbor in neighbors {

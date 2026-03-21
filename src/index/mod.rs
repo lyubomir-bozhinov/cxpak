@@ -6,6 +6,7 @@ use crate::budget::counter::TokenCounter;
 use crate::context_quality::expansion::Domain;
 use crate::parser::language::{Import, ParseResult, Symbol, Visibility};
 use crate::scanner::ScannedFile;
+use crate::schema::SchemaIndex;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
@@ -17,6 +18,7 @@ pub struct CodebaseIndex {
     pub total_tokens: usize,
     pub term_frequencies: HashMap<String, HashMap<String, u32>>,
     pub domains: HashSet<Domain>,
+    pub schema: Option<SchemaIndex>,
 }
 
 #[derive(Debug)]
@@ -130,6 +132,7 @@ impl CodebaseIndex {
             language_stats,
             term_frequencies,
             domains,
+            schema: None,
         }
     }
 
@@ -259,6 +262,7 @@ impl CodebaseIndex {
             language_stats,
             term_frequencies,
             domains,
+            schema: None,
         }
     }
 

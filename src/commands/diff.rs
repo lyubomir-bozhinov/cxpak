@@ -254,7 +254,7 @@ pub fn run(
 
     // 5. Build dependency graph
     let graph_start = std::time::Instant::now();
-    let graph = crate::index::graph::build_dependency_graph(&index);
+    let graph = crate::index::graph::build_dependency_graph(&index, index.schema.as_ref());
     if timing {
         eprintln!("cxpak [timing]: graph      {:.1?}", graph_start.elapsed());
     }
@@ -293,10 +293,10 @@ pub fn run(
         let mut one_hop: HashSet<String> = changed_paths.clone();
         for file in &changed_paths {
             if let Some(deps) = graph.dependencies(file) {
-                one_hop.extend(deps.iter().cloned());
+                one_hop.extend(deps.iter().map(|e| e.target.clone()));
             }
             for dep in graph.dependents(file) {
-                one_hop.insert(dep.to_string());
+                one_hop.insert(dep.target.to_string());
             }
         }
         one_hop

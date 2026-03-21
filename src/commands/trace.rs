@@ -93,7 +93,7 @@ pub fn run(
 
     // 5. Build dependency graph
     let graph_start = Instant::now();
-    let graph = build_dependency_graph(&index);
+    let graph = build_dependency_graph(&index, index.schema.as_ref());
     if timing {
         eprintln!("cxpak [timing]: graph      {:.1?}", graph_start.elapsed());
     }
@@ -164,10 +164,10 @@ pub fn run(
         let mut one_hop: HashSet<String> = matched_files.iter().map(|&s| s.to_string()).collect();
         for &file in &matched_files {
             if let Some(deps) = graph.dependencies(file) {
-                one_hop.extend(deps.iter().cloned());
+                one_hop.extend(deps.iter().map(|e| e.target.clone()));
             }
             for dep in graph.dependents(file) {
-                one_hop.insert(dep.to_string());
+                one_hop.insert(dep.target.to_string());
             }
         }
         one_hop

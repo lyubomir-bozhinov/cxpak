@@ -757,7 +757,7 @@ fn handle_tool_call(
             let expanded_tokens = expand_query(task, &index.domains);
             let scorer = crate::relevance::MultiSignalScorer::new().with_expansion(expanded_tokens);
             let all_scored = scorer.score_all(task, index);
-            let graph = crate::index::graph::build_dependency_graph(index);
+            let graph = crate::index::graph::build_dependency_graph(index, index.schema.as_ref());
             let seeds = crate::relevance::seed::select_seeds_with_graph(
                 &all_scored,
                 index,
@@ -771,7 +771,7 @@ fn handle_tool_call(
                 .map(|s| {
                     let deps: Vec<&str> = graph
                         .dependencies(&s.path)
-                        .map(|d| d.iter().map(String::as_str).collect())
+                        .map(|d| d.iter().map(|e| e.target.as_str()).collect())
                         .unwrap_or_default();
                     let signals: Vec<Value> = s
                         .signals
@@ -843,7 +843,10 @@ fn handle_tool_call(
             let mut target_files: Vec<(String, FileRole, Option<String>)> = vec![];
             let mut seen: HashSet<String> = HashSet::new();
             let graph = if include_deps {
-                Some(crate::index::graph::build_dependency_graph(index))
+                Some(crate::index::graph::build_dependency_graph(
+                    index,
+                    index.schema.as_ref(),
+                ))
             } else {
                 None
             };
@@ -858,9 +861,9 @@ fn handle_tool_call(
                 if let Some(ref g) = graph {
                     if let Some(deps) = g.dependencies(path) {
                         for dep in deps {
-                            if seen.insert(dep.clone()) {
+                            if seen.insert(dep.target.clone()) {
                                 target_files.push((
-                                    dep.clone(),
+                                    dep.target.clone(),
                                     FileRole::Dependency,
                                     Some(path.clone()),
                                 ));

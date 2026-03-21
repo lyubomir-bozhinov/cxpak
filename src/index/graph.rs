@@ -1,10 +1,11 @@
 use super::CodebaseIndex;
+use crate::schema::{EdgeType, TypedEdge};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Debug, Default)]
 pub struct DependencyGraph {
-    pub edges: HashMap<String, HashSet<String>>,
-    pub reverse_edges: HashMap<String, HashSet<String>>,
+    pub edges: HashMap<String, HashSet<TypedEdge>>,
+    pub reverse_edges: HashMap<String, HashSet<TypedEdge>>,
 }
 
 impl DependencyGraph {
@@ -12,25 +13,31 @@ impl DependencyGraph {
         Self::default()
     }
 
-    pub fn add_edge(&mut self, from: &str, to: &str) {
+    pub fn add_edge(&mut self, from: &str, to: &str, edge_type: EdgeType) {
         self.edges
             .entry(from.to_string())
             .or_default()
-            .insert(to.to_string());
+            .insert(TypedEdge {
+                target: to.to_string(),
+                edge_type: edge_type.clone(),
+            });
         self.reverse_edges
             .entry(to.to_string())
             .or_default()
-            .insert(from.to_string());
+            .insert(TypedEdge {
+                target: from.to_string(),
+                edge_type,
+            });
     }
 
-    pub fn dependents(&self, path: &str) -> Vec<&str> {
+    pub fn dependents(&self, path: &str) -> Vec<&TypedEdge> {
         self.reverse_edges
             .get(path)
-            .map(|set| set.iter().map(String::as_str).collect())
+            .map(|set| set.iter().collect())
             .unwrap_or_default()
     }
 
-    pub fn dependencies(&self, path: &str) -> Option<&HashSet<String>> {
+    pub fn dependencies(&self, path: &str) -> Option<&HashSet<TypedEdge>> {
         self.edges.get(path)
     }
 
@@ -40,11 +47,11 @@ impl DependencyGraph {
     /// edges from a freshly parsed file.
     pub fn remove_edges_for(&mut self, source: &str) {
         if let Some(targets) = self.edges.remove(source) {
-            for target in &targets {
-                if let Some(rev) = self.reverse_edges.get_mut(target.as_str()) {
-                    rev.remove(source);
+            for edge in &targets {
+                if let Some(rev) = self.reverse_edges.get_mut(edge.target.as_str()) {
+                    rev.retain(|e| e.target != source);
                     if rev.is_empty() {
-                        self.reverse_edges.remove(target.as_str());
+                        self.reverse_edges.remove(edge.target.as_str());
                     }
                 }
             }
@@ -68,18 +75,18 @@ impl DependencyGraph {
         while let Some(current) = queue.pop_front() {
             // Follow outgoing edges (files that `current` imports)
             if let Some(deps) = self.edges.get(&current) {
-                for dep in deps {
-                    if visited.insert(dep.clone()) {
-                        queue.push_back(dep.clone());
+                for edge in deps {
+                    if visited.insert(edge.target.clone()) {
+                        queue.push_back(edge.target.clone());
                     }
                 }
             }
 
             // Follow incoming edges (files that import `current`)
             if let Some(importers) = self.reverse_edges.get(&current) {
-                for importer in importers {
-                    if visited.insert(importer.clone()) {
-                        queue.push_back(importer.clone());
+                for edge in importers {
+                    if visited.insert(edge.target.clone()) {
+                        queue.push_back(edge.target.clone());
                     }
                 }
             }
@@ -93,7 +100,14 @@ impl DependencyGraph {
 /// indexed file paths.  We do a best-effort match: convert the module path
 /// (e.g. `crate::scanner`) to a file path (e.g. `src/scanner/mod.rs` or
 /// `src/scanner.rs`) and look up whether such a file exists.
-pub fn build_dependency_graph(index: &CodebaseIndex) -> DependencyGraph {
+///
+/// The optional `schema` parameter is reserved for future schema-aware edge
+/// injection (Task 13: build_schema_edges). For now it is accepted but unused;
+/// all edges produced here are `EdgeType::Import`.
+pub fn build_dependency_graph(
+    index: &CodebaseIndex,
+    _schema: Option<&crate::schema::SchemaIndex>,
+) -> DependencyGraph {
     let all_paths: HashSet<&str> = index
         .files
         .iter()
@@ -125,12 +139,15 @@ pub fn build_dependency_graph(index: &CodebaseIndex) -> DependencyGraph {
 
             for candidate in &candidates {
                 if all_paths.contains(candidate.as_str()) {
-                    graph.add_edge(&file.relative_path, candidate);
+                    graph.add_edge(&file.relative_path, candidate, EdgeType::Import);
                     break;
                 }
             }
         }
     }
+
+    // TODO (Task 13): inject schema-aware edges via build_schema_edges(index, schema_index)
+    // when schema is Some.
 
     graph
 }
@@ -150,31 +167,31 @@ mod tests {
     #[test]
     fn test_add_edge() {
         let mut graph = DependencyGraph::new();
-        graph.add_edge("a.rs", "b.rs");
+        graph.add_edge("a.rs", "b.rs", EdgeType::Import);
         assert!(graph.edges.contains_key("a.rs"));
-        assert!(graph.edges["a.rs"].contains("b.rs"));
+        assert!(graph.edges["a.rs"].iter().any(|e| e.target == "b.rs"));
     }
 
     #[test]
     fn test_dependents() {
         let mut graph = DependencyGraph::new();
-        graph.add_edge("a.rs", "b.rs");
-        graph.add_edge("c.rs", "b.rs");
+        graph.add_edge("a.rs", "b.rs", EdgeType::Import);
+        graph.add_edge("c.rs", "b.rs", EdgeType::Import);
         let deps = graph.dependents("b.rs");
         assert_eq!(deps.len(), 2);
-        assert!(deps.contains(&"a.rs"));
-        assert!(deps.contains(&"c.rs"));
+        assert!(deps.iter().any(|e| e.target == "a.rs"));
+        assert!(deps.iter().any(|e| e.target == "c.rs"));
     }
 
     #[test]
     fn test_dependencies() {
         let mut graph = DependencyGraph::new();
-        graph.add_edge("a.rs", "b.rs");
-        graph.add_edge("a.rs", "c.rs");
+        graph.add_edge("a.rs", "b.rs", EdgeType::Import);
+        graph.add_edge("a.rs", "c.rs", EdgeType::Import);
         let deps = graph.dependencies("a.rs").unwrap();
         assert_eq!(deps.len(), 2);
-        assert!(deps.contains("b.rs"));
-        assert!(deps.contains("c.rs"));
+        assert!(deps.iter().any(|e| e.target == "b.rs"));
+        assert!(deps.iter().any(|e| e.target == "c.rs"));
     }
 
     #[test]
@@ -186,8 +203,8 @@ mod tests {
     #[test]
     fn test_reachable_from_single() {
         let mut graph = DependencyGraph::new();
-        graph.add_edge("a.rs", "b.rs");
-        graph.add_edge("b.rs", "c.rs");
+        graph.add_edge("a.rs", "b.rs", EdgeType::Import);
+        graph.add_edge("b.rs", "c.rs", EdgeType::Import);
         let reachable = graph.reachable_from(&["a.rs"]);
         assert!(reachable.contains("a.rs"));
         assert!(reachable.contains("b.rs"));
@@ -197,7 +214,7 @@ mod tests {
     #[test]
     fn test_reachable_from_reverse() {
         let mut graph = DependencyGraph::new();
-        graph.add_edge("a.rs", "b.rs");
+        graph.add_edge("a.rs", "b.rs", EdgeType::Import);
         let reachable = graph.reachable_from(&["b.rs"]);
         assert!(reachable.contains("a.rs"));
         assert!(reachable.contains("b.rs"));
@@ -206,9 +223,9 @@ mod tests {
     #[test]
     fn test_reachable_from_cycle() {
         let mut graph = DependencyGraph::new();
-        graph.add_edge("a.rs", "b.rs");
-        graph.add_edge("b.rs", "c.rs");
-        graph.add_edge("c.rs", "a.rs");
+        graph.add_edge("a.rs", "b.rs", EdgeType::Import);
+        graph.add_edge("b.rs", "c.rs", EdgeType::Import);
+        graph.add_edge("c.rs", "a.rs", EdgeType::Import);
         let reachable = graph.reachable_from(&["a.rs"]);
         assert_eq!(reachable.len(), 3);
     }
@@ -216,8 +233,8 @@ mod tests {
     #[test]
     fn test_reachable_from_disconnected() {
         let mut graph = DependencyGraph::new();
-        graph.add_edge("a.rs", "b.rs");
-        graph.add_edge("c.rs", "d.rs");
+        graph.add_edge("a.rs", "b.rs", EdgeType::Import);
+        graph.add_edge("c.rs", "d.rs", EdgeType::Import);
         let reachable = graph.reachable_from(&["a.rs"]);
         assert!(reachable.contains("a.rs"));
         assert!(reachable.contains("b.rs"));
@@ -228,7 +245,7 @@ mod tests {
     #[test]
     fn test_reachable_from_empty_start() {
         let mut graph = DependencyGraph::new();
-        graph.add_edge("a.rs", "b.rs");
+        graph.add_edge("a.rs", "b.rs", EdgeType::Import);
         let reachable = graph.reachable_from(&[]);
         assert!(reachable.is_empty());
     }
@@ -236,30 +253,45 @@ mod tests {
     #[test]
     fn test_duplicate_edges() {
         let mut graph = DependencyGraph::new();
-        graph.add_edge("a.rs", "b.rs");
-        graph.add_edge("a.rs", "b.rs");
+        graph.add_edge("a.rs", "b.rs", EdgeType::Import);
+        graph.add_edge("a.rs", "b.rs", EdgeType::Import);
         assert_eq!(graph.edges["a.rs"].len(), 1);
     }
 
     #[test]
     fn test_reverse_edges_maintained() {
         let mut graph = DependencyGraph::new();
-        graph.add_edge("a.rs", "b.rs");
-        graph.add_edge("c.rs", "b.rs");
-        graph.add_edge("a.rs", "d.rs");
+        graph.add_edge("a.rs", "b.rs", EdgeType::Import);
+        graph.add_edge("c.rs", "b.rs", EdgeType::Import);
+        graph.add_edge("a.rs", "d.rs", EdgeType::Import);
         // reverse_edges should exist and be populated
-        assert!(graph.reverse_edges.get("b.rs").unwrap().contains("a.rs"));
-        assert!(graph.reverse_edges.get("b.rs").unwrap().contains("c.rs"));
-        assert!(graph.reverse_edges.get("d.rs").unwrap().contains("a.rs"));
+        assert!(graph
+            .reverse_edges
+            .get("b.rs")
+            .unwrap()
+            .iter()
+            .any(|e| e.target == "a.rs"));
+        assert!(graph
+            .reverse_edges
+            .get("b.rs")
+            .unwrap()
+            .iter()
+            .any(|e| e.target == "c.rs"));
+        assert!(graph
+            .reverse_edges
+            .get("d.rs")
+            .unwrap()
+            .iter()
+            .any(|e| e.target == "a.rs"));
         assert_eq!(graph.reverse_edges.get("b.rs").unwrap().len(), 2);
     }
 
     #[test]
     fn test_remove_edges_for_file() {
         let mut graph = DependencyGraph::new();
-        graph.add_edge("a.rs", "b.rs");
-        graph.add_edge("a.rs", "c.rs");
-        graph.add_edge("d.rs", "b.rs");
+        graph.add_edge("a.rs", "b.rs", EdgeType::Import);
+        graph.add_edge("a.rs", "c.rs", EdgeType::Import);
+        graph.add_edge("d.rs", "b.rs", EdgeType::Import);
 
         graph.remove_edges_for("a.rs");
 
@@ -268,7 +300,7 @@ mod tests {
         // b.rs should only have d.rs as dependent now
         let b_deps = graph.dependents("b.rs");
         assert_eq!(b_deps.len(), 1);
-        assert!(b_deps.contains(&"d.rs"));
+        assert!(b_deps.iter().any(|e| e.target == "d.rs"));
         // c.rs should have no dependents
         assert!(graph.dependents("c.rs").is_empty());
     }
@@ -276,7 +308,7 @@ mod tests {
     #[test]
     fn test_remove_edges_for_nonexistent() {
         let mut graph = DependencyGraph::new();
-        graph.add_edge("a.rs", "b.rs");
+        graph.add_edge("a.rs", "b.rs", EdgeType::Import);
         graph.remove_edges_for("z.rs"); // no-op
         assert_eq!(graph.edges["a.rs"].len(), 1);
     }
@@ -284,27 +316,57 @@ mod tests {
     #[test]
     fn test_remove_and_readd_edges() {
         let mut graph = DependencyGraph::new();
-        graph.add_edge("a.rs", "b.rs");
-        graph.add_edge("a.rs", "c.rs");
+        graph.add_edge("a.rs", "b.rs", EdgeType::Import);
+        graph.add_edge("a.rs", "c.rs", EdgeType::Import);
 
         // Simulate re-parse: remove old, add new
         graph.remove_edges_for("a.rs");
-        graph.add_edge("a.rs", "d.rs");
+        graph.add_edge("a.rs", "d.rs", EdgeType::Import);
 
         assert_eq!(graph.edges["a.rs"].len(), 1);
-        assert!(graph.edges["a.rs"].contains("d.rs"));
+        assert!(graph.edges["a.rs"].iter().any(|e| e.target == "d.rs"));
         assert!(graph.dependents("b.rs").is_empty());
         assert!(graph.dependents("c.rs").is_empty());
-        assert_eq!(graph.dependents("d.rs"), vec!["a.rs"]);
+        let deps = graph.dependents("d.rs");
+        assert!(deps.iter().any(|e| e.target == "a.rs") && deps.len() == 1);
     }
 
     #[test]
     fn test_dependents_large_graph() {
         let mut graph = DependencyGraph::new();
         for i in 0..100 {
-            graph.add_edge(&format!("file_{i}.rs"), "common.rs");
+            graph.add_edge(&format!("file_{i}.rs"), "common.rs", EdgeType::Import);
         }
         let deps = graph.dependents("common.rs");
         assert_eq!(deps.len(), 100);
+    }
+
+    #[test]
+    fn test_add_typed_edge() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("models/user.rs", "schema.sql", EdgeType::ForeignKey);
+        let deps = graph.dependencies("models/user.rs").unwrap();
+        assert!(deps
+            .iter()
+            .any(|e| e.target == "schema.sql" && e.edge_type == EdgeType::ForeignKey));
+    }
+
+    #[test]
+    fn test_multiple_edge_types_same_target() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a.rs", "b.rs", EdgeType::Import);
+        graph.add_edge("a.rs", "b.rs", EdgeType::ForeignKey);
+        // Two different TypedEdges (same target, different edge_type) → both stored
+        assert_eq!(graph.edges["a.rs"].len(), 2);
+    }
+
+    #[test]
+    fn test_dependents_returns_typed_edges() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a.rs", "b.rs", EdgeType::Import);
+        let deps = graph.dependents("b.rs");
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].target, "a.rs");
+        assert_eq!(deps[0].edge_type, EdgeType::Import);
     }
 }

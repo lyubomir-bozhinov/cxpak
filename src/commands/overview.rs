@@ -69,7 +69,7 @@ pub fn run(
     let mut index = CodebaseIndex::build_with_content(files, parse_results, &counter, content_map);
 
     // 3b. Rank files by importance and sort so high-value files get budget first
-    let graph = build_dependency_graph(&index);
+    let graph = build_dependency_graph(&index, index.schema.as_ref());
     let git_ctx = git::extract_git_context(path, 20).ok();
     let file_paths: Vec<String> = index
         .files
