@@ -2,11 +2,12 @@ use crate::budget::counter::TokenCounter;
 use crate::commands::watch::{apply_incremental_update, classify_changes};
 use crate::context_quality::annotation::{annotate_file, AnnotationContext};
 use crate::context_quality::degradation::{allocate_with_degradation, FileRole};
-use crate::context_quality::expansion::expand_query;
+use crate::context_quality::expansion::{expand_query, Domain};
 use crate::daemon::watcher::FileWatcher;
 use crate::index::CodebaseIndex;
 use crate::parser::LanguageRegistry;
 use crate::scanner::Scanner;
+use crate::schema::EdgeType;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -754,7 +755,20 @@ fn handle_tool_call(
             let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(15) as usize;
             let focus = args.get("focus").and_then(|f| f.as_str());
 
-            let expanded_tokens = expand_query(task, &index.domains);
+            let mut expanded_tokens = expand_query(task, &index.domains);
+            // When the Database domain is active and schema is indexed, add table
+            // and column names as additional expansion terms so that files referencing
+            // those identifiers score higher.
+            if index.domains.contains(&Domain::Database) {
+                if let Some(schema) = &index.schema {
+                    for (name, table) in &schema.tables {
+                        expanded_tokens.insert(name.to_lowercase());
+                        for col in &table.columns {
+                            expanded_tokens.insert(col.name.to_lowercase());
+                        }
+                    }
+                }
+            }
             let scorer = crate::relevance::MultiSignalScorer::new().with_expansion(expanded_tokens);
             let all_scored = scorer.score_all(task, index);
             let graph = crate::index::graph::build_dependency_graph(index, index.schema.as_ref());
@@ -839,8 +853,9 @@ fn handle_tool_call(
                 .collect();
 
             // Track which paths came from user selection vs. dependency expansion,
-            // and which file originally pulled each dependency in.
-            let mut target_files: Vec<(String, FileRole, Option<String>)> = vec![];
+            // the file that pulled each dependency in, and the edge type used.
+            let mut target_files: Vec<(String, FileRole, Option<String>, Option<EdgeType>)> =
+                vec![];
             let mut seen: HashSet<String> = HashSet::new();
             let graph = if include_deps {
                 Some(crate::index::graph::build_dependency_graph(
@@ -856,7 +871,7 @@ fn handle_tool_call(
                     continue;
                 }
                 if seen.insert(path.clone()) {
-                    target_files.push((path.clone(), FileRole::Selected, None));
+                    target_files.push((path.clone(), FileRole::Selected, None, None));
                 }
                 if let Some(ref g) = graph {
                     if let Some(deps) = g.dependencies(path) {
@@ -866,6 +881,7 @@ fn handle_tool_call(
                                     dep.target.clone(),
                                     FileRole::Dependency,
                                     Some(path.clone()),
+                                    Some(dep.edge_type.clone()),
                                 ));
                             }
                         }
@@ -880,9 +896,10 @@ fn handle_tool_call(
                 FileRole,
                 f64,
                 Option<String>,
+                Option<EdgeType>,
             )> = vec![];
 
-            for (path, role, parent) in &target_files {
+            for (path, role, parent, edge_type) in &target_files {
                 match index_map.get(path.as_str()) {
                     Some(&idx) => {
                         // Selected files get a high relevance score; dependencies lower.
@@ -890,7 +907,13 @@ fn handle_tool_call(
                             FileRole::Selected => 1.0,
                             FileRole::Dependency => 0.5,
                         };
-                        indexed_targets.push((&index.files[idx], *role, score, parent.clone()));
+                        indexed_targets.push((
+                            &index.files[idx],
+                            *role,
+                            score,
+                            parent.clone(),
+                            edge_type.clone(),
+                        ));
                     }
                     None => {
                         not_found.push(json!({ "path": path }));
@@ -901,7 +924,7 @@ fn handle_tool_call(
             // Allocate budget with progressive degradation.
             let alloc_inputs: Vec<(&crate::index::IndexedFile, FileRole, f64)> = indexed_targets
                 .iter()
-                .map(|(f, role, score, _)| (*f, *role, *score))
+                .map(|(f, role, score, _, _)| (*f, *role, *score))
                 .collect();
             let allocated = allocate_with_degradation(&alloc_inputs, token_budget);
 
@@ -909,7 +932,7 @@ fn handle_tool_call(
             let mut packed: Vec<Value> = vec![];
             let mut total_tokens = 0usize;
 
-            for (alloc, (indexed_file, role, _score, parent)) in
+            for (alloc, (indexed_file, role, _score, parent, edge_type)) in
                 allocated.iter().zip(indexed_targets.iter())
             {
                 let rendered_tokens: usize = alloc.symbols.iter().map(|s| s.rendered_tokens).sum();
@@ -921,6 +944,25 @@ fn handle_tool_call(
                     indexed_file.token_count
                 };
 
+                // Build the annotation parent string: for non-Import edges, append the edge type.
+                let annotation_parent = parent.as_ref().map(|p| match edge_type {
+                    Some(et) if *et != EdgeType::Import => {
+                        let label = match et {
+                            EdgeType::ForeignKey => "foreign_key",
+                            EdgeType::ViewReference => "view_reference",
+                            EdgeType::TriggerTarget => "trigger_target",
+                            EdgeType::IndexTarget => "index_target",
+                            EdgeType::FunctionReference => "function_reference",
+                            EdgeType::EmbeddedSql => "embedded_sql",
+                            EdgeType::OrmModel => "orm_model",
+                            EdgeType::MigrationSequence => "migration_sequence",
+                            EdgeType::Import => unreachable!(),
+                        };
+                        format!("{p} (via: {label})")
+                    }
+                    _ => p.clone(),
+                });
+
                 let annotation_ctx = AnnotationContext {
                     path: indexed_file.relative_path.clone(),
                     language: indexed_file.language.clone().unwrap_or_default(),
@@ -929,7 +971,7 @@ fn handle_tool_call(
                         FileRole::Dependency => 0.5,
                     },
                     role: *role,
-                    parent: parent.clone(),
+                    parent: annotation_parent,
                     signals: vec![],
                     detail_level: alloc.level,
                     tokens: effective_tokens,
@@ -2694,5 +2736,250 @@ mod tests {
             let _ = top_score; // used above indirectly
         }
         assert!(!candidates.is_empty(), "should return candidates");
+    }
+
+    // --- Task 17: Pipeline integration tests ---
+
+    /// Helper: build a minimal CodebaseIndex directly (without disk I/O) with
+    /// a SchemaIndex attached, ready for use in pipeline tests.
+    fn make_sql_index_with_fk() -> CodebaseIndex {
+        use crate::schema::{ColumnSchema, ForeignKeyRef, SchemaIndex, TableSchema};
+
+        let counter = TokenCounter::new();
+        let files = vec![
+            crate::scanner::ScannedFile {
+                relative_path: "schema/users.sql".to_string(),
+                absolute_path: std::path::PathBuf::from("/tmp/schema/users.sql"),
+                language: Some("sql".to_string()),
+                size_bytes: 100,
+            },
+            crate::scanner::ScannedFile {
+                relative_path: "schema/orders.sql".to_string(),
+                absolute_path: std::path::PathBuf::from("/tmp/schema/orders.sql"),
+                language: Some("sql".to_string()),
+                size_bytes: 120,
+            },
+        ];
+        let content_map = HashMap::from([
+            (
+                "schema/users.sql".to_string(),
+                "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);".to_string(),
+            ),
+            (
+                "schema/orders.sql".to_string(),
+                "CREATE TABLE orders (id INT PRIMARY KEY, user_id INT REFERENCES users(id));"
+                    .to_string(),
+            ),
+        ]);
+
+        let users_table = TableSchema {
+            name: "users".to_string(),
+            columns: vec![ColumnSchema {
+                name: "id".to_string(),
+                data_type: "INT".to_string(),
+                nullable: false,
+                default: None,
+                constraints: vec![],
+                foreign_key: None,
+            }],
+            primary_key: Some(vec!["id".to_string()]),
+            indexes: vec![],
+            file_path: "schema/users.sql".to_string(),
+            start_line: 1,
+        };
+        let orders_table = TableSchema {
+            name: "orders".to_string(),
+            columns: vec![ColumnSchema {
+                name: "user_id".to_string(),
+                data_type: "INT".to_string(),
+                nullable: true,
+                default: None,
+                constraints: vec![],
+                foreign_key: Some(ForeignKeyRef {
+                    target_table: "users".to_string(),
+                    target_column: "id".to_string(),
+                }),
+            }],
+            primary_key: Some(vec!["id".to_string()]),
+            indexes: vec![],
+            file_path: "schema/orders.sql".to_string(),
+            start_line: 1,
+        };
+
+        let mut schema = SchemaIndex::empty();
+        schema.tables.insert("users".to_string(), users_table);
+        schema.tables.insert("orders".to_string(), orders_table);
+
+        let mut index =
+            CodebaseIndex::build_with_content(files, HashMap::new(), &counter, content_map);
+        index.schema = Some(schema);
+        index
+    }
+
+    #[test]
+    fn test_pipeline_sql_repo_produces_fk_edges() {
+        let index = make_sql_index_with_fk();
+        let graph = crate::index::graph::build_dependency_graph(&index, index.schema.as_ref());
+
+        // orders.sql → users.sql via ForeignKey
+        let deps = graph
+            .dependencies("schema/orders.sql")
+            .expect("orders.sql should have deps");
+        assert!(
+            deps.iter().any(|e| e.target == "schema/users.sql"
+                && e.edge_type == crate::schema::EdgeType::ForeignKey),
+            "orders.sql should have a ForeignKey edge to users.sql, got: {:?}",
+            deps
+        );
+    }
+
+    #[test]
+    fn test_pipeline_python_embedded_sql_produces_embedded_sql_edge() {
+        use crate::schema::{ColumnSchema, SchemaIndex, TableSchema};
+
+        let counter = TokenCounter::new();
+        let files = vec![
+            crate::scanner::ScannedFile {
+                relative_path: "schema/products.sql".to_string(),
+                absolute_path: std::path::PathBuf::from("/tmp/schema/products.sql"),
+                language: Some("sql".to_string()),
+                size_bytes: 60,
+            },
+            crate::scanner::ScannedFile {
+                relative_path: "api/orders.py".to_string(),
+                absolute_path: std::path::PathBuf::from("/tmp/api/orders.py"),
+                language: Some("python".to_string()),
+                size_bytes: 100,
+            },
+        ];
+        let content_map = HashMap::from([
+            (
+                "schema/products.sql".to_string(),
+                "CREATE TABLE products (id INT, name TEXT);".to_string(),
+            ),
+            (
+                "api/orders.py".to_string(),
+                "def list_products(db):\n    return db.execute('SELECT id FROM products WHERE active = 1')".to_string(),
+            ),
+        ]);
+
+        let products_table = TableSchema {
+            name: "products".to_string(),
+            columns: vec![ColumnSchema {
+                name: "id".to_string(),
+                data_type: "INT".to_string(),
+                nullable: false,
+                default: None,
+                constraints: vec![],
+                foreign_key: None,
+            }],
+            primary_key: None,
+            indexes: vec![],
+            file_path: "schema/products.sql".to_string(),
+            start_line: 1,
+        };
+
+        let mut schema = SchemaIndex::empty();
+        schema.tables.insert("products".to_string(), products_table);
+
+        let mut index =
+            CodebaseIndex::build_with_content(files, HashMap::new(), &counter, content_map);
+        index.schema = Some(schema);
+
+        let graph = crate::index::graph::build_dependency_graph(&index, index.schema.as_ref());
+        let deps = graph
+            .dependencies("api/orders.py")
+            .expect("api/orders.py should have deps");
+        assert!(
+            deps.iter().any(|e| e.target == "schema/products.sql"
+                && e.edge_type == crate::schema::EdgeType::EmbeddedSql),
+            "api/orders.py should have an EmbeddedSql edge to schema/products.sql, got: {:?}",
+            deps
+        );
+    }
+
+    #[test]
+    fn test_pipeline_plain_rust_repo_has_no_schema() {
+        let index = make_test_index();
+        assert!(
+            index.schema.is_none(),
+            "a plain Rust repo should have schema: None"
+        );
+    }
+
+    #[test]
+    fn test_pipeline_orm_model_produces_orm_edge() {
+        use crate::schema::{ColumnSchema, OrmFramework, OrmModelSchema, SchemaIndex, TableSchema};
+
+        let counter = TokenCounter::new();
+        let files = vec![
+            crate::scanner::ScannedFile {
+                relative_path: "schema/users.sql".to_string(),
+                absolute_path: std::path::PathBuf::from("/tmp/schema/users.sql"),
+                language: Some("sql".to_string()),
+                size_bytes: 80,
+            },
+            crate::scanner::ScannedFile {
+                relative_path: "app/models.py".to_string(),
+                absolute_path: std::path::PathBuf::from("/tmp/app/models.py"),
+                language: Some("python".to_string()),
+                size_bytes: 150,
+            },
+        ];
+        let content_map = HashMap::from([
+            (
+                "schema/users.sql".to_string(),
+                "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);".to_string(),
+            ),
+            (
+                "app/models.py".to_string(),
+                "class User(models.Model):\n    class Meta:\n        db_table = 'users'"
+                    .to_string(),
+            ),
+        ]);
+
+        let users_table = TableSchema {
+            name: "users".to_string(),
+            columns: vec![ColumnSchema {
+                name: "id".to_string(),
+                data_type: "INT".to_string(),
+                nullable: false,
+                default: None,
+                constraints: vec![],
+                foreign_key: None,
+            }],
+            primary_key: Some(vec!["id".to_string()]),
+            indexes: vec![],
+            file_path: "schema/users.sql".to_string(),
+            start_line: 1,
+        };
+
+        let mut schema = SchemaIndex::empty();
+        schema.tables.insert("users".to_string(), users_table);
+        schema.orm_models.insert(
+            "User".to_string(),
+            OrmModelSchema {
+                class_name: "User".to_string(),
+                table_name: "users".to_string(),
+                framework: OrmFramework::Django,
+                file_path: "app/models.py".to_string(),
+                fields: vec![],
+            },
+        );
+
+        let mut index =
+            CodebaseIndex::build_with_content(files, HashMap::new(), &counter, content_map);
+        index.schema = Some(schema);
+
+        let graph = crate::index::graph::build_dependency_graph(&index, index.schema.as_ref());
+        let deps = graph
+            .dependencies("app/models.py")
+            .expect("app/models.py should have deps");
+        assert!(
+            deps.iter().any(|e| e.target == "schema/users.sql"
+                && e.edge_type == crate::schema::EdgeType::OrmModel),
+            "app/models.py should have an OrmModel edge to schema/users.sql, got: {:?}",
+            deps
+        );
     }
 }
