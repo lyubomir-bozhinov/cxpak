@@ -2,11 +2,12 @@ use crate::budget::counter::TokenCounter;
 use crate::budget::degrader;
 use crate::cli::OutputFormat;
 use crate::git;
-use crate::index::graph::build_dependency_graph;
+use crate::index::graph::{build_dependency_graph, DependencyGraph};
 use crate::index::ranking;
 use crate::index::CodebaseIndex;
 use crate::output::{self, OutputSections};
 use crate::scanner::Scanner;
+use crate::schema::EdgeType;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::Path;
@@ -196,7 +197,7 @@ pub fn run(
     let signatures =
         render_relevant_signatures(&index, &relevant_paths, token_budget / 4, &counter);
     let dep_subgraph =
-        render_dependency_subgraph(&index, &relevant_paths, token_budget / 8, &counter);
+        render_dependency_subgraph(&index, &graph, &relevant_paths, token_budget / 8, &counter);
 
     let sections = OutputSections {
         metadata,
@@ -336,9 +337,24 @@ fn render_relevant_signatures(
     budgeted
 }
 
+fn edge_type_display(et: &EdgeType) -> &'static str {
+    match et {
+        EdgeType::Import => "import",
+        EdgeType::ForeignKey => "foreign_key",
+        EdgeType::ViewReference => "view_reference",
+        EdgeType::TriggerTarget => "trigger_target",
+        EdgeType::IndexTarget => "index_target",
+        EdgeType::FunctionReference => "function_reference",
+        EdgeType::EmbeddedSql => "embedded_sql",
+        EdgeType::OrmModel => "orm_model",
+        EdgeType::MigrationSequence => "migration_sequence",
+    }
+}
+
 /// Render the dependency edges for files in the relevant subgraph.
 fn render_dependency_subgraph(
     index: &CodebaseIndex,
+    graph: &DependencyGraph,
     relevant_paths: &HashSet<String>,
     budget: usize,
     counter: &TokenCounter,
@@ -349,40 +365,37 @@ fn render_dependency_subgraph(
         if !relevant_paths.contains(&file.relative_path) {
             continue;
         }
-        let Some(pr) = &file.parse_result else {
-            continue;
-        };
-        let relevant_imports: Vec<_> = pr
-            .imports
-            .iter()
-            .filter(|imp| {
-                // Only show imports that resolved to a relevant file
-                let candidate_base = imp.source.replace("::", "/").replace('.', "/");
-                let candidates = [
-                    format!("{candidate_base}.rs"),
-                    format!("{candidate_base}/mod.rs"),
-                    format!("src/{candidate_base}.rs"),
-                    format!("src/{candidate_base}/mod.rs"),
-                    format!("{candidate_base}.ts"),
-                    format!("{candidate_base}.js"),
-                    format!("{candidate_base}.py"),
-                    format!("{candidate_base}.go"),
-                    format!("{candidate_base}.java"),
-                ];
-                candidates.iter().any(|c| relevant_paths.contains(c))
-            })
-            .collect();
 
-        if relevant_imports.is_empty() {
+        // Collect typed edges from the dependency graph that point to relevant files.
+        let typed_edges: Vec<_> = graph
+            .dependencies(&file.relative_path)
+            .map(|deps| {
+                let mut v: Vec<_> = deps
+                    .iter()
+                    .filter(|e| relevant_paths.contains(&e.target))
+                    .collect();
+                v.sort_by(|a, b| a.target.cmp(&b.target));
+                v
+            })
+            .unwrap_or_default();
+
+        if typed_edges.is_empty() {
             continue;
         }
 
         full.push_str(&format!("**{}** imports:\n", file.relative_path));
-        for imp in relevant_imports {
-            if imp.names.is_empty() {
-                full.push_str(&format!("- `{}`\n", imp.source));
-            } else {
-                full.push_str(&format!("- `{}` — {}\n", imp.source, imp.names.join(", ")));
+        for edge in typed_edges {
+            match &edge.edge_type {
+                EdgeType::Import => {
+                    full.push_str(&format!("- `{}`\n", edge.target));
+                }
+                et => {
+                    full.push_str(&format!(
+                        "- `{}` (via: {})\n",
+                        edge.target,
+                        edge_type_display(et)
+                    ));
+                }
             }
         }
         full.push('\n');
@@ -397,9 +410,11 @@ fn render_dependency_subgraph(
 mod tests {
     use super::*;
     use crate::budget::counter::TokenCounter;
+    use crate::index::graph::DependencyGraph;
     use crate::index::CodebaseIndex;
     use crate::parser::language::{Import, ParseResult, Symbol, SymbolKind, Visibility};
     use crate::scanner::ScannedFile;
+    use crate::schema::EdgeType;
     use std::collections::HashMap;
     use std::path::PathBuf;
 
@@ -534,11 +549,20 @@ mod tests {
         assert!(result.is_empty());
     }
 
+    fn make_test_graph() -> DependencyGraph {
+        let mut g = DependencyGraph::new();
+        // main.rs imports lib.rs
+        g.add_edge("src/main.rs", "src/lib.rs", EdgeType::Import);
+        // lib.rs imports util.rs
+        g.add_edge("src/lib.rs", "src/util.rs", EdgeType::Import);
+        g
+    }
+
     #[test]
-    fn test_render_dependency_subgraph_with_named_imports() {
+    fn test_render_dependency_subgraph_with_import_edges() {
         let counter = TokenCounter::new();
         let index = make_trace_index();
-        // main.rs imports src/lib with names ["run"], lib.rs imports src/util with empty names
+        let graph = make_test_graph();
         let relevant: HashSet<String> = [
             "src/main.rs".to_string(),
             "src/lib.rs".to_string(),
@@ -546,33 +570,73 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let result = render_dependency_subgraph(&index, &relevant, 50000, &counter);
-        // main.rs → src/lib resolves to src/lib.rs which is in relevant
+        let result = render_dependency_subgraph(&index, &graph, &relevant, 50000, &counter);
+        // main.rs → src/lib.rs (Import edge, no via: label)
         assert!(result.contains("**src/main.rs** imports:"));
-        assert!(result.contains("- `src/lib` — run"));
-        // lib.rs → src/util with empty names
+        assert!(result.contains("- `src/lib.rs`"));
+        assert!(!result.contains("(via:"));
+        // lib.rs → src/util.rs
         assert!(result.contains("**src/lib.rs** imports:"));
-        assert!(result.contains("- `src/util`"));
+        assert!(result.contains("- `src/util.rs`"));
     }
 
     #[test]
-    fn test_render_dependency_subgraph_no_parse_result() {
+    fn test_render_dependency_subgraph_with_typed_edge() {
         let counter = TokenCounter::new();
         let index = make_trace_index();
-        // util.rs has no parse result → hits `continue` at line 399
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("src/main.rs", "src/lib.rs", EdgeType::ForeignKey);
+        let relevant: HashSet<String> = ["src/main.rs".to_string(), "src/lib.rs".to_string()]
+            .into_iter()
+            .collect();
+        let result = render_dependency_subgraph(&index, &graph, &relevant, 50000, &counter);
+        assert!(result.contains("(via: foreign_key)"));
+    }
+
+    #[test]
+    fn test_render_dependency_subgraph_no_edges_for_file() {
+        let counter = TokenCounter::new();
+        let index = make_trace_index();
+        let graph = DependencyGraph::new(); // empty graph
         let relevant: HashSet<String> = ["src/util.rs".to_string()].into_iter().collect();
-        let result = render_dependency_subgraph(&index, &relevant, 50000, &counter);
+        let result = render_dependency_subgraph(&index, &graph, &relevant, 50000, &counter);
         assert!(result.is_empty());
     }
 
     #[test]
-    fn test_render_dependency_subgraph_no_relevant_imports() {
+    fn test_render_dependency_subgraph_no_relevant_targets() {
         let counter = TokenCounter::new();
         let index = make_trace_index();
-        // Only main.rs in relevant, but its import (src/lib) won't resolve since lib.rs isn't relevant
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("src/main.rs", "src/lib.rs", EdgeType::Import);
+        // Only main.rs in relevant, lib.rs is not → edge filtered out
         let relevant: HashSet<String> = ["src/main.rs".to_string()].into_iter().collect();
-        let result = render_dependency_subgraph(&index, &relevant, 50000, &counter);
-        // main.rs imports src/lib, but src/lib.rs is NOT in relevant → no imports shown
+        let result = render_dependency_subgraph(&index, &graph, &relevant, 50000, &counter);
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_edge_type_display_all_variants() {
+        assert_eq!(edge_type_display(&EdgeType::Import), "import");
+        assert_eq!(edge_type_display(&EdgeType::ForeignKey), "foreign_key");
+        assert_eq!(
+            edge_type_display(&EdgeType::ViewReference),
+            "view_reference"
+        );
+        assert_eq!(
+            edge_type_display(&EdgeType::TriggerTarget),
+            "trigger_target"
+        );
+        assert_eq!(edge_type_display(&EdgeType::IndexTarget), "index_target");
+        assert_eq!(
+            edge_type_display(&EdgeType::FunctionReference),
+            "function_reference"
+        );
+        assert_eq!(edge_type_display(&EdgeType::EmbeddedSql), "embedded_sql");
+        assert_eq!(edge_type_display(&EdgeType::OrmModel), "orm_model");
+        assert_eq!(
+            edge_type_display(&EdgeType::MigrationSequence),
+            "migration_sequence"
+        );
     }
 }
