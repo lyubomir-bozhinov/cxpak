@@ -55,7 +55,7 @@ cxpak clean .                                         # Clear cache
 
 Run cxpak as an [MCP](https://modelcontextprotocol.io/) server so your AI tool gets live access to 7 codebase tools — including relevance scoring, query expansion, and schema-aware context packing.
 
-**Claude Code** — add to `.claude/settings.json` in your project (or `~/.claude/settings.json` globally):
+**Claude Code** — add to `.mcp.json` in your project root (or `~/.claude/.mcp.json` globally):
 
 ```json
 {
@@ -68,7 +68,9 @@ Run cxpak as an [MCP](https://modelcontextprotocol.io/) server so your AI tool g
 }
 ```
 
-**Cursor** — add to `.cursor/mcp.json`:
+Restart Claude Code after adding the config. The cxpak tools will appear automatically.
+
+**Cursor** — add to `.cursor/mcp.json` in your project:
 
 ```json
 {
